@@ -45,9 +45,9 @@ class CPPConversions:
             'double_array': lambda defined_type, templates: 'std::vector<double>',
             'int_array': lambda defined_type, templates: 'std::vector<int64_t>',
             'string_array': lambda defined_type, templates: 'std::vector<std::string>',
-            'double_array_fixed': lambda defined_type, templates: f'rsl::StaticVector<{templates[0]}, {templates[1]}>',
-            'int_array_fixed': lambda defined_type, templates: f'rsl::StaticVector<{templates[0]}, {templates[1]}>',
-            'string_array_fixed': lambda defined_type, templates: f'rsl::StaticVector<{templates[0]}, {templates[1]}>',
+            'double_array_fixed': lambda defined_type, templates: f'std::array<{templates[0]}, {templates[1]}>',
+            'int_array_fixed': lambda defined_type, templates: f'std::array<{templates[0]}, {templates[1]}>',
+            'string_array_fixed': lambda defined_type, templates: f'std::array<{templates[0]}, {templates[1]}>',
             'string_fixed': lambda defined_type, templates: f'rsl::StaticString<{templates[1]}>',
         }
         self.yaml_type_to_as_function = {
