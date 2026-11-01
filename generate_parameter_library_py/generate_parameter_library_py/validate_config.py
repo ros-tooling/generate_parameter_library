@@ -73,15 +73,20 @@ class Quoted(str):
 
     ROS 2 keeps a quoted scalar a string whatever it contains, while the same
     text unquoted may be read as a number or a bool. Subclassing str keeps
-    every consumer working; only the type check looks at the quoting.
+    every consumer working; only the type check looks at the quoting. Block
+    scalars (| and >) are not quoted: rcl_yaml_param_parser resolves their
+    type like a plain scalar.
     """
 
     __slots__ = ()
 
 
+QUOTED_STYLES = ("'", '"')
+
+
 def _construct_scalar_text(loader, node):
     text = loader.construct_scalar(node)
-    return Quoted(text) if node.style else text
+    return Quoted(text) if node.style in QUOTED_STYLES else text
 
 
 class ConfigLoader(yaml.SafeLoader):
@@ -232,15 +237,28 @@ def coerce_value(parameter: 'DeclaredParameter', value: Any) -> Any:
     return value
 
 
-def check_type(
-    parameter: DeclaredParameter, value: Any, from_config: bool = True
-) -> Optional[str]:
-    """Return an error message when a value does not match the declared type.
+def runtime_default(parameter: 'DeclaredParameter') -> Any:
+    """Return the default_value the way the generated code holds it.
 
-    The bool words are only read as a bool when rcl_yaml_param_parser parses
-    the text, so a definition's default_value, which is compiled into the node
-    as a literal, is exempt from that check.
+    A default is compiled into the node as a literal, not parsed by
+    rcl_yaml_param_parser, and the generator converts an integer written for a
+    double, so `default_value: 1` is the double 1.0 at runtime.
     """
+    value = parameter.default_value
+    if parameter.scalar_type != 'double':
+        return value
+
+    def as_double(item):
+        is_int = isinstance(item, int) and not isinstance(item, bool)
+        return float(item) if is_int else item
+
+    if isinstance(value, list):
+        return [as_double(item) for item in value]
+    return as_double(value)
+
+
+def check_type(parameter: DeclaredParameter, value: Any) -> Optional[str]:
+    """Return an error message when a configured value does not match the declared type."""
     scalar = parameter.scalar_type
     size = parameter.fixed_size
 
@@ -248,7 +266,7 @@ def check_type(
         problem = check_scalar_type(scalar, value)
         if problem is not None:
             return problem
-        if from_config and scalar == 'string' and reads_as_bool(value):
+        if scalar == 'string' and reads_as_bool(value):
             return (
                 f'ROS 2 reads {value} as a bool unless it is quoted, and this '
                 f'parameter is declared as a string'
@@ -270,7 +288,7 @@ def check_type(
         problem = check_scalar_type(scalar, element)
         if problem is not None:
             return f'element {index} of the array: {problem}'
-        if from_config and scalar == 'string' and reads_as_bool(element):
+        if scalar == 'string' and reads_as_bool(element):
             return (
                 f'element {index} of the array: ROS 2 reads {element} as a bool '
                 f'unless it is quoted, and this parameter is declared as a '
@@ -529,17 +547,17 @@ def validate_section(
                 continue
             # The node validates the effective value, which is the declared
             # default when the configuration sets nothing, so the default has
-            # to pass the same checks a configured value would. A default is
-            # compiled into the node as a literal, so the checks that only
-            # apply to text rcl_yaml_param_parser parses are skipped.
-            problem = check_type(parameter, parameter.default_value, from_config=False)
-            if problem is None:
-                for severity, message in run_validations(
-                    parameter, coerce_value(parameter, parameter.default_value)
-                ):
-                    if severity == ERROR:
-                        problem = message
-                        break
+            # to pass the definition's validators. Its type is not checked:
+            # the generator already did that at build time, and the rules in
+            # check_type are about how rcl_yaml_param_parser reads text, which
+            # does not apply to a compiled-in literal such as [] or 1.
+            problem = None
+            for severity, message in run_validations(
+                parameter, runtime_default(parameter)
+            ):
+                if severity == ERROR:
+                    problem = message
+                    break
             if problem is not None:
                 diagnostics.append(
                     Diagnostic(

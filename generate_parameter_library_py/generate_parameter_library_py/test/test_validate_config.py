@@ -671,6 +671,57 @@ def test_bool_word_in_a_default_is_a_string(workspace):
     assert validate([definition], [config]) == []
 
 
+def test_empty_default_array_is_not_reported(workspace):
+    """An empty default is compiled into the node, rcl never reads it."""
+    definition = write(
+        workspace,
+        'definition.yaml',
+        'default_node:\n'
+        '  joints:\n'
+        '    type: string_array\n'
+        '    default_value: []\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'default_node:\n  ros__parameters: {}\n',
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_integer_default_for_a_double_is_not_reported(workspace):
+    """The generator converts an integer default_value of a double to 1.0."""
+    definition = write(
+        workspace,
+        'definition.yaml',
+        'default_node:\n'
+        '  rate:\n'
+        '    type: double\n'
+        '    default_value: 1\n'
+        '    validation:\n'
+        '      gt<>: [0.0]\n'
+        '  gains:\n'
+        '    type: double_array\n'
+        '    default_value: [1, 2]\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'default_node:\n  ros__parameters: {}\n',
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_block_scalar_is_read_like_a_plain_scalar(workspace, definition):
+    """rcl_yaml_param_parser only keeps single and double quoted scalars as text."""
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    rate: >-\n      2.0\n    mandatory_gain: 1.5\n',
+    )
+    assert validate([definition], [config]) == []
+
+
 def test_empty_array_is_reported(workspace, definition):
     """ROS 2 cannot type an empty sequence and leaves the parameter unset."""
     config = write(
