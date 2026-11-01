@@ -632,9 +632,12 @@ is matched to the definition whose root element has the same name; when exactly
 one definition is given it is used for every section.
 
 A configuration section may be written as `node:`, `/node:`, under any
-number of namespace levels, or as `/**:`, and a file may hold several nodes.
-Values under `/**` apply to every section with lower precedence than a
-section's own.
+number of namespace levels, or with the wildcards `/*` (one level) and `/**`
+(any number of levels), as in `/**:` or `/robot/*/node:`, and a file may hold
+several nodes. As at runtime, a node receives the values of every section that
+matches its name, in file order, so a later section overrides an earlier one.
+A section whose node name is a wildcard is only checked on its own when the
+file names no node.
 
 Without further options the tool reports what makes a node fail to start or
 behave unexpectedly:

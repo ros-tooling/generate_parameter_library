@@ -37,6 +37,7 @@ it can be used as a CI step or by anyone who configures a robot from a laptop.
 import argparse
 import difflib
 import os
+import re
 import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -47,7 +48,9 @@ from generate_parameter_library_py.parse_yaml import GenerateCode
 from generate_parameter_library_py.python_validators import ParameterValidators
 
 ROS_PARAMETERS_KEY = 'ros__parameters'
-WILDCARD_NODE = '/**'
+WILDCARD_NAMES = ('*', '**')
+# Stands in for a wildcard level when matching sections against each other.
+WILDCARD_STAND_IN = '__any__'
 
 ERROR = 'ERROR'
 WARNING = 'WARNING'
@@ -483,32 +486,108 @@ def declared_parameters(
     return parameters, free_form
 
 
+def join_node_name(namespace: str, key: str) -> str:
+    """Append a key to a node name the way rcl_yaml_param_parser does.
+
+    The levels are joined with a slash unless the name already ends with one,
+    so `/ns: {ctrl: ...}` and `/ns/: {ctrl: ...}` both name `/ns/ctrl`.
+    """
+    if not namespace:
+        return key
+    return namespace + key if namespace.endswith('/') else f'{namespace}/{key}'
+
+
 def node_sections(document: Dict) -> Dict[str, Dict[str, Any]]:
     """Return the parameter tree of every node in a ROS parameter file.
 
     A `ros__parameters` key may sit under any number of namespace levels, as
     in `robot: {arm: {my_node: {ros__parameters: ...}}}`, so the mapping is
-    walked recursively and the levels are joined into the section name. A file
+    walked recursively and the levels are joined into the section name. The
+    sections keep the order of the file, which decides precedence. A file
     without any `ros__parameters` key is treated as a single unnamed section,
     so that plain parameter trees can be validated too.
+
+    Raises ConfigError for a name rcl_yaml_param_parser rejects, which makes
+    the whole file fail to load.
     """
 
-    def walk(tree: Dict[str, Any], namespace: List[str]) -> None:
+    def walk(tree: Dict[str, Any], namespace: str) -> None:
         for key, value in tree.items():
             if not isinstance(value, dict):
                 continue
+            name = join_node_name(namespace, str(key))
             if ROS_PARAMETERS_KEY in value:
-                sections['/'.join(namespace + [str(key)])] = (
-                    value[ROS_PARAMETERS_KEY] or {}
-                )
+                if '//' in name:
+                    raise ConfigError(
+                        f'{name} contains a repeated forward slash, '
+                        f'rcl_yaml_param_parser rejects the whole file'
+                    )
+                sections[name] = value[ROS_PARAMETERS_KEY] or {}
                 continue
-            walk(value, namespace + [str(key)])
+            walk(value, name)
 
     sections: Dict[str, Dict[str, Any]] = {}
-    walk(document, [])
+    walk(document, '')
     if not sections:
         return {'': document}
     return sections
+
+
+def fully_qualified(section: str) -> str:
+    return section if section.startswith('/') else f'/{section}'
+
+
+def is_wildcard_node(section: str) -> bool:
+    return node_name_of(section) in WILDCARD_NAMES
+
+
+def section_matches(section: str, node_fqn: str) -> bool:
+    """Does a section apply to the node, as rclcpp's is_node_name_matched decides?
+
+    `/*` stands for exactly one level and `/**` for any number of levels.
+    """
+    pattern = fully_qualified(section).replace('/*', r'(/\w+)')
+    try:
+        return re.fullmatch(pattern, node_fqn) is not None
+    except re.error:
+        return False
+
+
+def stand_in_node(section: str) -> str:
+    """A node name that a wildcard section describes, to match others against."""
+    return '/'.join(
+        WILDCARD_STAND_IN if level in WILDCARD_NAMES else level
+        for level in fully_qualified(section).split('/')
+    )
+
+
+def effective_sections(
+    sections: Dict[str, Dict[str, Any]],
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """Return the values each node described by a file receives at runtime.
+
+    rclcpp applies every section whose name matches the node, wildcard or not,
+    in file order, so a later section wins over an earlier one. A section whose
+    node name is a wildcard describes no node of its own; it is only validated
+    when the file has no other section, the usual shape when the node name is
+    not pinned. Sections that name the same node, such as `/ns/ctrl` and
+    `ns: {ctrl: ...}`, are validated once.
+    """
+    if '' in sections:
+        return [('', flatten(sections['']))]
+    names = list(sections)
+    nodes = [name for name in names if not is_wildcard_node(name)] or names
+    targets: Dict[str, str] = {}
+    for name in nodes:
+        targets.setdefault(stand_in_node(name), name)
+    effective = []
+    for node_fqn, name in targets.items():
+        values: Dict[str, Any] = {}
+        for other in names:
+            if section_matches(other, node_fqn):
+                values.update(flatten(sections[other]))
+        effective.append((name, values))
+    return effective
 
 
 def is_exempt(name: str, free_form: List[str]) -> bool:
@@ -633,6 +712,15 @@ def load_yaml(path: str) -> Dict:
     return document
 
 
+def read_config(path: str) -> Dict[str, Dict[str, Any]]:
+    """Load a configuration file and split it into its node sections."""
+    document = load_yaml(path)
+    try:
+        return node_sections(document)
+    except ConfigError as error:
+        raise ConfigError(f'{path}: {error}')
+
+
 def read_definition(path: str):
     """Parse a definition, reporting a bad file without a traceback."""
     try:
@@ -650,7 +738,7 @@ def validate(
 ) -> List[Diagnostic]:
     """Validate every config against the definitions whose namespace matches."""
     diagnostics = []
-    configs = [(path, node_sections(load_yaml(path))) for path in config_paths]
+    configs = [(path, read_config(path)) for path in config_paths]
     used = {node_name_of(name) for _, sections in configs for name in sections}
     definitions, unused, duplicates = load_definitions(definition_paths, used)
     single_definition = len(definition_paths) == 1
@@ -671,16 +759,9 @@ def validate(
         )
 
     for config_path, sections in configs:
-        wildcard_tree = sections.pop(WILDCARD_NODE, None)
-        wildcard = flatten(wildcard_tree or {})
-        if wildcard_tree is not None and not sections:
-            # A file whose only section is the wildcard still describes a node,
-            # and is the usual shape when the node name is not pinned.
-            sections[WILDCARD_NODE] = {}
-        matched = any(node_name_of(name) in definitions for name in sections)
-        for section_name, tree in sections.items():
-            values = dict(wildcard)
-            values.update(flatten(tree))
+        nodes = effective_sections(sections)
+        matched = any(node_name_of(name) in definitions for name, _ in nodes)
+        for section_name, values in nodes:
             node_name = node_name_of(section_name)
             if node_name in definitions:
                 generator = definitions[node_name]

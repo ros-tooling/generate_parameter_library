@@ -653,6 +653,90 @@ def test_valid_config_in_a_nested_namespace_reports_nothing(workspace, definitio
     assert validate([definition], [config]) == []
 
 
+def test_later_section_wins_over_an_earlier_one(workspace, definition):
+    """rclcpp applies matching sections in file order, wildcard or not."""
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n'
+        '  ros__parameters:\n'
+        '    rate: 20.0\n'
+        '    mandatory_gain: 1.5\n'
+        '/**:\n'
+        '  ros__parameters:\n'
+        '    rate: -1.0\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == 'my_node.rate'
+
+
+def test_single_level_wildcards_match_like_rclcpp(workspace, definition):
+    """/* stands for one level and /** for any number, anywhere in the name."""
+    config = write(
+        workspace,
+        'config.yaml',
+        '/*/arm/*:\n'
+        '  ros__parameters:\n'
+        '    mandatory_gain: 1.5\n'
+        '/**/arm/my_node:\n'
+        '  ros__parameters:\n'
+        '    rate: -1.0\n'
+        '/robot/arm/my_node:\n'
+        '  ros__parameters:\n'
+        '    name: "a"\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert {d.location for d in found} == {
+        '/**/arm/my_node.rate',
+        '/robot/arm/my_node.rate',
+    }
+
+
+def test_single_level_wildcard_does_not_reach_deeper_nodes(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        '/robot/*:\n'
+        '  ros__parameters:\n'
+        '    mandatory_gain: 1.5\n'
+        '/robot/arm/my_node:\n'
+        '  ros__parameters:\n'
+        '    rate: 20.0\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == '/robot/arm/my_node.mandatory_gain'
+
+
+def test_spellings_of_one_node_are_merged(workspace, definition):
+    """/ns/my_node and ns: {my_node: ...} name the same node."""
+    config = write(
+        workspace,
+        'config.yaml',
+        '/ns/my_node:\n'
+        '  ros__parameters:\n'
+        '    mandatory_gain: 1.5\n'
+        'ns:\n'
+        '  my_node:\n'
+        '    ros__parameters:\n'
+        '      rate: -1.0\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == '/ns/my_node.rate'
+
+
+def test_repeated_slash_in_a_node_name_is_rejected(workspace, definition):
+    """rcl_yaml_param_parser refuses /ns: {/my_node: ...} and the whole file."""
+    config = write(
+        workspace,
+        'config.yaml',
+        '/ns:\n  /my_node:\n    ros__parameters:\n      mandatory_gain: 1.5\n',
+    )
+    assert main(['--param-definition', definition, '--config', config]) == 1
+
+
 def test_bool_word_in_a_default_is_a_string(workspace):
     """A default_value is compiled into the node, not parsed as config text."""
     definition = write(
