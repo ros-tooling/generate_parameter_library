@@ -141,6 +141,7 @@ setup(
             'generate_parameter_library_cpp = generate_parameter_library_py.generate_cpp_header:main',
             'generate_parameter_library_python = generate_parameter_library_py.generate_python_module:main',
             'generate_parameter_library_markdown = generate_parameter_library_py.generate_markdown:main',
+            'generate_parameter_library_validate = generate_parameter_library_py.validate_config:main',
         ],
     },
 )
