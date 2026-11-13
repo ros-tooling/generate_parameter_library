@@ -24,8 +24,8 @@ descriptor.additional_constraints = {{parameter_additional_constraints | valid_s
 {%- endfor %}
 {%- if range.lower is not none or range.upper is not none %}
 descriptor.floating_point_range.resize(1);
-descriptor.floating_point_range.at(0).from_value = {{range.lower if range.lower is not none else "std::numeric_limits<double>::lowest()"}};
-descriptor.floating_point_range.at(0).to_value = {{range.upper if range.upper is not none else "std::numeric_limits<double>::max()"}};
+descriptor.floating_point_range.at(0).from_value = {{range.lower if range.lower is not none else "-std::numeric_limits<double>::infinity()"}};
+descriptor.floating_point_range.at(0).to_value = {{range.upper if range.upper is not none else "std::numeric_limits<double>::infinity()"}};
 {%- endif %}
 {%- elif "INTEGER" in parameter_type %}
 {%- set range = namespace(lower=None, upper=None) %}

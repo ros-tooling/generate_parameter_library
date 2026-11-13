@@ -74,7 +74,7 @@ TEST_F(DescriptorTest, check_integer_descriptors) {
 TEST_F(DescriptorTest, check_lower_upper_bounds) {
   EXPECT_EQ(descriptors_[2].floating_point_range.at(0).from_value, 0.0001);
   EXPECT_EQ(descriptors_[2].floating_point_range.at(0).to_value,
-            std::numeric_limits<double>::max());
+            std::numeric_limits<double>::infinity());
 }
 
 TEST_F(DescriptorTest, check_lt_eq) {

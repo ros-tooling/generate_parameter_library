@@ -345,6 +345,11 @@ admittance_controller:
     type: int_array_fixed_5
     default_value: [3,3,3]
     read_only: true
+  double_no_upper_bound:
+    type: double
+    default_value: .inf
+    validation:
+      gt_eq<>: 0
   hover_override:
     type: int
     default_value: 1
