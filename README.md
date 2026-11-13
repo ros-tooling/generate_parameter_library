@@ -389,6 +389,34 @@ validation:
   "my_project::integer_equal_value": [3]
 ```
 
+For Python modules, pass the validation module to `generate_parameter_module` in `setup.py`.
+The functions receive the generated `rclpy.Parameter` as the first argument and return an
+empty string when the parameter is valid. Any non-empty string is treated as the validation
+error message.
+
+```python
+generate_parameter_module(
+    module_name,
+    yaml_file,
+    validation_module='generate_parameter_module_example.custom_validation',
+)
+```
+
+The Python example includes custom validators such as:
+
+```python
+import math
+
+
+def validate_damping_ratio(param, lower_bound, upper_bound):
+    for value in param.value:
+        if not math.isfinite(value) or value <= 0.0:
+            return f"Parameter '{param.name}' must contain finite positive damping ratios"
+        if value < lower_bound or value > upper_bound:
+            return f"Value {value} in parameter '{param.name}' must be within bounds"
+    return ''
+```
+
 ### Nested structures
 After the top-level key, every subsequent non-leaf key will generate a nested C++ struct. The struct instance will have
 the same name as the key.
