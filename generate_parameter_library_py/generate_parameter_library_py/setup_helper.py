@@ -84,6 +84,28 @@ def _generate(command, specs, package_root, add_missing_init):
     return outputs
 
 
+def _replace_outputs(command, kind, outputs):
+    """Delete the files the previous ``kind`` run generated that outputs no longer has.
+
+    A module whose YAML was renamed or removed from setup.py would otherwise
+    stay next to the package's own files and keep being installed or imported.
+    Only files listed in the record are deleted, so user files are never touched.
+    """
+    record = os.path.join(
+        command.get_finalized_command('build').build_base,
+        f'generate_parameter_library_{kind}.txt',
+    )
+    outputs = [os.path.abspath(output) for output in outputs]
+    if os.path.exists(record):
+        with open(record) as f:
+            for stale in set(f.read().splitlines()) - set(outputs):
+                if os.path.exists(stale):
+                    os.remove(stale)
+    os.makedirs(os.path.dirname(record), exist_ok=True)
+    with open(record, 'w') as f:
+        f.write('\n'.join(outputs))
+
+
 def _source_package_root(command):
     source_dir = _source_dir(command.distribution)
     return lambda pkg: os.path.join(source_dir, command.get_package_dir(pkg))
@@ -108,7 +130,8 @@ def parameter_cmdclass(
     --symlink-install``, ``pip install -e``) generate into the source package,
     which is the copy Python imports in that mode; ``develop --uninstall``,
     which colcon runs when such a build is rebuilt without
-    ``--symlink-install``, removes them from there again.
+    ``--symlink-install``, removes them from there again. A module that is no
+    longer generated, e.g. after renaming it, is removed on the next build.
     """
     if modules is None:
         modules = [
@@ -140,9 +163,10 @@ def parameter_cmdclass(
             if getattr(self, 'editable_mode', False):
                 # PEP 660 editable wheel: the source tree is what gets imported.
                 # The generated files live there, so they stay out of get_outputs().
-                _generate(
+                generated = _generate(
                     self, specs, _source_package_root(self), add_missing_init=False
                 )
+                _replace_outputs(self, 'source', generated)
                 return
             self._generated = _generate(
                 self,
@@ -150,6 +174,7 @@ def parameter_cmdclass(
                 lambda pkg: os.path.join(self.build_lib, *pkg.split('.')),
                 add_missing_init=True,
             )
+            _replace_outputs(self, 'build_lib', self._generated)
 
         def get_source_files(self):
             # sdist collects its pure-Python inputs from here.
@@ -175,8 +200,12 @@ def parameter_cmdclass(
                     _, output_file = _output_file(build_py_cmd, spec, package_root)
                     if os.path.exists(output_file):
                         os.remove(output_file)
+                _replace_outputs(build_py_cmd, 'source', [])
             else:
-                _generate(build_py_cmd, specs, package_root, add_missing_init=False)
+                generated = _generate(
+                    build_py_cmd, specs, package_root, add_missing_init=False
+                )
+                _replace_outputs(build_py_cmd, 'source', generated)
             super().run()
 
     return {'build_py': BuildPy, 'develop': Develop}

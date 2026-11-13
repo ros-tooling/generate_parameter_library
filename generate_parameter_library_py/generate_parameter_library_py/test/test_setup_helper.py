@@ -275,6 +275,42 @@ def write_multi_module_package(root):
     return root
 
 
+def rename_module(root, new_name):
+    setup_py = os.path.join(root, 'setup.py')
+    content = read(setup_py).replace("'probe_parameters'", f"'{new_name}'")
+    with open(setup_py, 'w') as f:
+        f.write(content)
+
+
+def test_build_removes_module_that_is_no_longer_generated(tmp_path):
+    # install copies all of build_lib, so a module left there by an earlier
+    # build would be installed although setup.py no longer generates it.
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    build(root, str(tmp_path))
+    rename_module(root, 'renamed_parameters')
+
+    build_lib = build(root, str(tmp_path))
+
+    generated = sorted(
+        f for f in os.listdir(os.path.join(build_lib, 'probe')) if f.endswith('.py')
+    )
+    assert generated == ['__init__.py', 'renamed_parameters.py']
+
+
+def test_develop_removes_module_that_is_no_longer_generated(tmp_path):
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    prefix = str(tmp_path / 'prefix')
+    run_setup(root, 'develop', '--prefix', prefix, '--no-deps')
+    rename_module(root, 'renamed_parameters')
+
+    run_setup(root, 'develop', '--prefix', prefix, '--no-deps')
+
+    assert sorted(os.listdir(os.path.join(root, 'probe'))) == [
+        'parameters.yaml',
+        'renamed_parameters.py',
+    ]
+
+
 def test_build_multiple_modules(tmp_path):
     root = write_multi_module_package(str(tmp_path / 'src'))
     build_lib = build(root, str(tmp_path))
