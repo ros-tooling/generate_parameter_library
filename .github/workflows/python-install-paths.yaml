@@ -28,7 +28,18 @@ jobs:
       fail-fast: false
       matrix:
         ROS_DISTRO: [humble, rolling]
-        build: ['', '--symlink-install']
+        layout: [isolated, symlink, merge]
+        include:
+          - layout: isolated
+            build_args: ''
+            test_args: ''
+          - layout: symlink
+            build_args: '--symlink-install'
+            test_args: ''
+          # The command from #257: merge-install into a non-default install base.
+          - layout: merge
+            build_args: '--merge-install --install-base install_merged'
+            test_args: '--merge-install --install-base install_merged'
     runs-on: ubuntu-latest
     container: ros:${{ matrix.ROS_DISTRO }}-ros-base
     steps:
@@ -51,11 +62,11 @@ jobs:
         shell: bash
         run: |
           source /opt/ros/${{ matrix.ROS_DISTRO }}/setup.bash
-          colcon build ${{ matrix.build }} --packages-up-to generate_parameter_module_example
+          colcon build ${{ matrix.build_args }} --packages-up-to generate_parameter_module_example
 
       - name: colcon test
         shell: bash
         run: |
           source /opt/ros/${{ matrix.ROS_DISTRO }}/setup.bash
-          colcon test --packages-select generate_parameter_module_example generate_parameter_library_py
+          colcon test ${{ matrix.test_args }} --packages-select generate_parameter_module_example generate_parameter_library_py
           colcon test-result --verbose

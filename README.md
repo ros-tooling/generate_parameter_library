@@ -91,7 +91,9 @@ setup(
 )
 ```
 
-The module is generated during the build, so it installs with the package, including with `--symlink-install` and other editable installs.
+The module is generated during the build, so it installs with the package.
+With `--symlink-install` and other editable installs, Python imports the source package, so the module is generated there instead (add it to `.gitignore`); rebuilding without `--symlink-install` removes it again.
+A module that is renamed or removed from `setup.py` is deleted from the build tree or source package on the next build, so it is not installed or imported anymore.
 For several modules, pass a list:
 
 ```python
