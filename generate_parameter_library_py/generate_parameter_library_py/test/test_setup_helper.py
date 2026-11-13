@@ -211,6 +211,37 @@ def test_develop_generates_into_source_without_init(tmp_path):
     assert default_frame(root) == 'probe_frame'
 
 
+def test_develop_src_layout(tmp_path):
+    # Regression test for #192 with --symlink-install: the package lives under
+    # src/, so the module must be generated next to it, not in the project root.
+    root = write_package(
+        str(tmp_path / 'src'),
+        'src/probe/parameters.yaml',
+        init_content='VALUE = 2\n',
+        package_dir='src',
+    )
+    run_setup(root, 'develop', '--prefix', str(tmp_path / 'prefix'), '--no-deps')
+
+    assert os.path.isfile(os.path.join(root, 'src', 'probe', 'probe_parameters.py'))
+    assert default_frame(os.path.join(root, 'src')) == 'probe_frame'
+    assert read(os.path.join(root, 'src', 'probe', '__init__.py')) == 'VALUE = 2\n'
+
+
+def test_develop_uninstall_removes_generated_module_from_source(tmp_path):
+    # colcon runs `setup.py develop --uninstall` when a package that was built
+    # with --symlink-install is rebuilt without it. A module left in the source
+    # tree would then shadow the installed one whenever the source is on
+    # sys.path, e.g. during `colcon test`.
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    prefix = str(tmp_path / 'prefix')
+    run_setup(root, 'develop', '--prefix', prefix, '--no-deps')
+    assert os.path.isfile(os.path.join(root, 'probe', 'probe_parameters.py'))
+
+    run_setup(root, 'develop', '--uninstall', '--prefix', prefix)
+
+    assert sorted(os.listdir(os.path.join(root, 'probe'))) == ['parameters.yaml']
+
+
 MULTI_MODULE_SETUP_PY = """from setuptools import setup
 
 from generate_parameter_library_py.setup_helper import parameter_cmdclass
@@ -242,6 +273,42 @@ def write_multi_module_package(root):
     with open(os.path.join(root, 'setup.py'), 'w') as f:
         f.write(MULTI_MODULE_SETUP_PY)
     return root
+
+
+def rename_module(root, new_name):
+    setup_py = os.path.join(root, 'setup.py')
+    content = read(setup_py).replace("'probe_parameters'", f"'{new_name}'")
+    with open(setup_py, 'w') as f:
+        f.write(content)
+
+
+def test_build_removes_module_that_is_no_longer_generated(tmp_path):
+    # install copies all of build_lib, so a module left there by an earlier
+    # build would be installed although setup.py no longer generates it.
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    build(root, str(tmp_path))
+    rename_module(root, 'renamed_parameters')
+
+    build_lib = build(root, str(tmp_path))
+
+    generated = sorted(
+        f for f in os.listdir(os.path.join(build_lib, 'probe')) if f.endswith('.py')
+    )
+    assert generated == ['__init__.py', 'renamed_parameters.py']
+
+
+def test_develop_removes_module_that_is_no_longer_generated(tmp_path):
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    prefix = str(tmp_path / 'prefix')
+    run_setup(root, 'develop', '--prefix', prefix, '--no-deps')
+    rename_module(root, 'renamed_parameters')
+
+    run_setup(root, 'develop', '--prefix', prefix, '--no-deps')
+
+    assert sorted(os.listdir(os.path.join(root, 'probe'))) == [
+        'parameters.yaml',
+        'renamed_parameters.py',
+    ]
 
 
 def test_build_multiple_modules(tmp_path):
