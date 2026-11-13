@@ -78,13 +78,31 @@ ament_export_targets(${PROJECT_NAME}Targets HAS_LIBRARY_TARGET)
 
 **setup.py**
 ```python
-from generate_parameter_library_py.setup_helper import generate_parameter_module
+from setuptools import setup
+from generate_parameter_library_py.setup_helper import parameter_cmdclass
 
-generate_parameter_module(
-  "turtlesim_parameters", # python module name for parameter library
-  "turtlesim/turtlesim_parameters.yaml", # path to input yaml file
+setup(
+  name="turtlesim",
+  packages=["turtlesim"],
+  cmdclass=parameter_cmdclass(
+    "turtlesim_parameters", # python module name for parameter library
+    "turtlesim/turtlesim_parameters.yaml", # path to input yaml file
+  ),
 )
 ```
+
+The module is generated during the build, so it installs with the package, including with `--symlink-install` and other editable installs.
+For several modules, pass a list:
+
+```python
+cmdclass=parameter_cmdclass(modules=[
+  {"module_name": "turtlesim_parameters", "yaml_file": "turtlesim/turtlesim_parameters.yaml"},
+  {"module_name": "pen_parameters", "yaml_file": "config/pen_parameters.yaml", "package": "turtlesim"},
+]),
+```
+
+If the package has its own `__init__.py`, `colcon test` imports the source tree before the installed package, so tests must drop the package's source directory from `sys.path`; see [example_python/test/conftest.py](example_python/test/conftest.py).
+The older `generate_parameter_module()` call in `setup.py` still works.
 
 For a Python package built with `ament_cmake_python`, use `generate_parameter_module()`
 in `CMakeLists.txt` and install the Python package with `ament_python_install_package()`:
