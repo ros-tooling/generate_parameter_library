@@ -78,13 +78,33 @@ ament_export_targets(${PROJECT_NAME}Targets HAS_LIBRARY_TARGET)
 
 **setup.py**
 ```python
-from generate_parameter_library_py.setup_helper import generate_parameter_module
+from setuptools import setup
+from generate_parameter_library_py.setup_helper import parameter_cmdclass
 
-generate_parameter_module(
-  "turtlesim_parameters", # python module name for parameter library
-  "turtlesim/turtlesim_parameters.yaml", # path to input yaml file
+setup(
+  name="turtlesim",
+  packages=["turtlesim"],
+  cmdclass=parameter_cmdclass(
+    "turtlesim_parameters", # python module name for parameter library
+    "turtlesim/turtlesim_parameters.yaml", # path to input yaml file
+  ),
 )
 ```
+
+The module is generated during the build, so it installs with the package.
+With `--symlink-install` and other editable installs, Python imports the source package, so the module is generated there instead (add it to `.gitignore`); rebuilding without `--symlink-install` removes it again.
+A module that is renamed or removed from `setup.py` is deleted from the build tree or source package on the next build, so it is not installed or imported anymore.
+For several modules, pass a list:
+
+```python
+cmdclass=parameter_cmdclass(modules=[
+  {"module_name": "turtlesim_parameters", "yaml_file": "turtlesim/turtlesim_parameters.yaml"},
+  {"module_name": "pen_parameters", "yaml_file": "config/pen_parameters.yaml", "package": "turtlesim"},
+]),
+```
+
+If the package has its own `__init__.py`, `colcon test` imports the source tree before the installed package, so tests must drop the package's source directory from `sys.path`; see [example_python/test/conftest.py](example_python/test/conftest.py).
+The older `generate_parameter_module()` call in `setup.py` still works.
 
 For a Python package built with `ament_cmake_python`, use `generate_parameter_module()`
 in `CMakeLists.txt` and install the Python package with `ament_python_install_package()`:
@@ -201,6 +221,7 @@ when using `gmock` test library.
 * [Example Project](#example-project)
 * [Generated code output](#generated-code-output)
 * [Generate markdown documentation](#generate-markdown-documentation)
+* [Validate a configuration file](#validate-a-configuration-file)
 
 ### Cpp namespace
 The root element of the YAML file determines the namespace used in the generated C++ code.
@@ -611,6 +632,84 @@ generate_parameter_library_markdown --input_yaml example/src/parameters.yaml --o
 
 This will generate a file `parameters.md` in the current folder that contains a markdown
 representation of the `parameters.yaml` file that you can directly include into your documentation.
+
+### Validate a configuration file
+
+`generate_parameter_library_validate` checks a ROS 2 parameter configuration
+file against one or more parameter definition files. It needs no ROS 2
+installation, no built workspace and no running node, so it can run as a CI step
+or on the laptop of somebody configuring a robot.
+
+```
+generate_parameter_library_validate \
+  --param-definition example/src/parameters.yaml \
+  --config config/robot.yaml
+```
+
+Pass `--param-definition` and `--config` more than once to check several
+definitions or several configuration files in one run. A configuration section
+is matched to the definition whose root element has the same name; when exactly
+one definition is given it is used for every section.
+
+A configuration section may be written as `node:`, `/node:`, under any
+number of namespace levels, or with the wildcards `/*` (one level) and `/**`
+(any number of levels), as in `/**:` or `/robot/*/node:`, and a file may hold
+several nodes. As at runtime, a node receives the values of every section that
+matches its name, in file order, so a later section overrides an earlier one.
+A section whose node name is a wildcard is only checked on its own when the
+file names no node.
+
+Without further options the tool reports what makes a node fail to start or
+behave unexpectedly:
+
+* a value whose type does not match the declared type, including an integer
+  written where a `double` is declared, which ROS 2 does not convert
+* a quoted scalar where a number or a bool is declared, which ROS 2 keeps a
+  string, or a plain `y` or `on` where a string is declared, which ROS 2
+  reads as a bool
+* an empty sequence, which `rcl_yaml_param_parser` cannot give a type and reads
+  as `PARAMETER_NOT_SET` rather than as an empty array
+* a value rejected by a built-in validator such as `bounds<>` or `one_of<>`
+* a parameter that is declared without a `default_value` and that the
+  configuration does not set
+* a parameter the configuration omits whose `default_value` fails the same
+  checks, because the node validates the effective value
+* two definitions that declare the same root element
+
+Scalars are read the way `rcl_yaml_param_parser` reads them rather than the way
+PyYAML does, so `1e5` counts as a `double` while a quoted `"2.0"` stays a
+`string`, exactly as at runtime.
+
+Adding `--strict` also reports parameters the configuration sets that no
+definition declares, with a suggestion when the name is close to a declared one,
+and parameters absent from the configuration that will take their default. The
+parameters every node declares for itself, such as `use_sim_time`, and the
+subtree under a parameter of type `none`, are not reported.
+
+```
+ERROR: my_node.background.r: Parameter 'my_node.background.r' with the value 300 must be within bounds [0, 255]
+ERROR: my_node.background.colour: unknown parameter (did you mean 'background.r'?)
+ERROR: my_node.pid.rate: expected type 'double', got 'string'
+WARNING: my_node.background.b: missing from config, will use default_value 0
+```
+
+The exit status is 1 when any error was reported and 0 otherwise, so the tool
+can gate a pipeline:
+
+```yaml
+- name: Validate robot config
+  run: |
+    pip install generate_parameter_library_py
+    generate_parameter_library_validate \
+      --param-definition src/navigation/config/nav_parameters.yaml \
+      --param-definition src/behavior/config/behavior_parameters.yaml \
+      --config deploy/config/robot_production.yaml \
+      --strict
+```
+
+Custom validator functions are C++ and cannot run outside a build, so they are
+reported as skipped rather than silently ignored. `read_only` describes
+behaviour at runtime and is not checked.
 
 # FAQ
 

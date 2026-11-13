@@ -28,27 +28,21 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import sys
-
 from setuptools import setup
 
+from generate_parameter_library_py.setup_helper import parameter_cmdclass
+
 package_name = 'generate_parameter_module_example'
-
-if len(sys.argv) >= 2 and sys.argv[1] != 'clean':
-    from generate_parameter_library_py.setup_helper import generate_parameter_module
-
-    # set module_name and yaml file
-    module_name = 'admittance_parameters'
-    yaml_file = 'generate_parameter_module_example/parameters.yaml'
-    validation_module = 'generate_parameter_module_example.custom_validation'
-    generate_parameter_module(
-        module_name, yaml_file, validation_module=validation_module
-    )
 
 setup(
     name=package_name,
     version='1.3.1',
     packages=[package_name],
+    cmdclass=parameter_cmdclass(
+        'admittance_parameters',
+        'generate_parameter_module_example/parameters.yaml',
+        validation_module='generate_parameter_module_example.custom_validation',
+    ),
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
