@@ -178,7 +178,7 @@ def main(args=None):
   color = params.background
   node.get_logger().info(
     "Background color (r,g,b): %d, %d, %d" %
-    color.r, color.g, color.b)
+    (color.r, color.g, color.b))
 ```
 
 ### Use example yaml files in tests
