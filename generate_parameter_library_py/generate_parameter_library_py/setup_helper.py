@@ -55,14 +55,20 @@ def _resolve_package(distribution, package, yaml_file):
     )
 
 
+def _output_file(command, spec, package_root):
+    """Return the resolved package of spec and the path its module is written to."""
+    module_name, yaml_file, _, package = spec
+    package = _resolve_package(command.distribution, package, yaml_file)
+    return package, os.path.join(package_root(package), module_name + '.py')
+
+
 def _generate(command, specs, package_root, add_missing_init):
     """Generate every spec into package_root(package) and return the written files."""
     source_dir = _source_dir(command.distribution)
     outputs = []
-    for module_name, yaml_file, validation_module, package in specs:
-        package = _resolve_package(command.distribution, package, yaml_file)
-        output_dir = package_root(package)
-        output_file = os.path.join(output_dir, module_name + '.py')
+    for spec in specs:
+        _, yaml_file, validation_module, _ = spec
+        package, output_file = _output_file(command, spec, package_root)
         source_init = os.path.join(
             source_dir, command.get_package_dir(package), '__init__.py'
         )
@@ -76,6 +82,28 @@ def _generate(command, specs, package_root, add_missing_init):
         )
         outputs.append(output_file)
     return outputs
+
+
+def _replace_outputs(command, kind, outputs):
+    """Delete the files the previous ``kind`` run generated that outputs no longer has.
+
+    A module whose YAML was renamed or removed from setup.py would otherwise
+    stay next to the package's own files and keep being installed or imported.
+    Only files listed in the record are deleted, so user files are never touched.
+    """
+    record = os.path.join(
+        command.get_finalized_command('build').build_base,
+        f'generate_parameter_library_{kind}.txt',
+    )
+    outputs = [os.path.abspath(output) for output in outputs]
+    if os.path.exists(record):
+        with open(record) as f:
+            for stale in set(f.read().splitlines()) - set(outputs):
+                if os.path.exists(stale):
+                    os.remove(stale)
+    os.makedirs(os.path.dirname(record), exist_ok=True)
+    with open(record, 'w') as f:
+        f.write('\n'.join(outputs))
 
 
 def _source_package_root(command):
@@ -100,7 +128,10 @@ def parameter_cmdclass(
     Regular builds generate into the build tree, so the module is installed
     with the rest of the package. Editable installs (``colcon build
     --symlink-install``, ``pip install -e``) generate into the source package,
-    which is the copy Python imports in that mode.
+    which is the copy Python imports in that mode; ``develop --uninstall``,
+    which colcon runs when such a build is rebuilt without
+    ``--symlink-install``, removes them from there again. A module that is no
+    longer generated, e.g. after renaming it, is removed on the next build.
     """
     if modules is None:
         modules = [
@@ -132,9 +163,10 @@ def parameter_cmdclass(
             if getattr(self, 'editable_mode', False):
                 # PEP 660 editable wheel: the source tree is what gets imported.
                 # The generated files live there, so they stay out of get_outputs().
-                _generate(
+                generated = _generate(
                     self, specs, _source_package_root(self), add_missing_init=False
                 )
+                _replace_outputs(self, 'source', generated)
                 return
             self._generated = _generate(
                 self,
@@ -142,6 +174,7 @@ def parameter_cmdclass(
                 lambda pkg: os.path.join(self.build_lib, *pkg.split('.')),
                 add_missing_init=True,
             )
+            _replace_outputs(self, 'build_lib', self._generated)
 
         def get_source_files(self):
             # sdist collects its pure-Python inputs from here.
@@ -157,12 +190,22 @@ def parameter_cmdclass(
     class Develop(develop):
         def run(self):
             build_py_cmd = self.get_finalized_command('build_py')
-            _generate(
-                build_py_cmd,
-                specs,
-                _source_package_root(build_py_cmd),
-                add_missing_init=False,
-            )
+            package_root = _source_package_root(build_py_cmd)
+            if self.uninstall:
+                # colcon runs `develop --uninstall` when a --symlink-install
+                # build is rebuilt without it; a module left in the source tree
+                # would shadow the installed one wherever the source is on
+                # sys.path, e.g. in `colcon test`.
+                for spec in specs:
+                    _, output_file = _output_file(build_py_cmd, spec, package_root)
+                    if os.path.exists(output_file):
+                        os.remove(output_file)
+                _replace_outputs(build_py_cmd, 'source', [])
+            else:
+                generated = _generate(
+                    build_py_cmd, specs, package_root, add_missing_init=False
+                )
+                _replace_outputs(build_py_cmd, 'source', generated)
             super().run()
 
     return {'build_py': BuildPy, 'develop': Develop}
