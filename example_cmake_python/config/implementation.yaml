@@ -11,6 +11,17 @@ admittance_controller:
     fixed_string_no_default:
       "happy"
 
+    fixed_string_array_no_default:
+    - "alpha"
+    - "beta"
+    - "gamma"
+    - "delta"
+    - "epsilon"
+
+    elbow_joint:
+      x:
+        weight: 2.0
+
     pid:
       shoulder_pan_joint:
         i: 0.7
@@ -111,3 +122,9 @@ admittance_controller:
     # general settings
     enable_parameter_update_without_reactivation: true
     use_feedforward_commanded_input: true
+
+    nested_map:
+      entry1:
+        value: 3.14
+      entry2:
+        value: 2.71
