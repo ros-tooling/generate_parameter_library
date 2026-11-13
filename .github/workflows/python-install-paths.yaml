@@ -1,0 +1,61 @@
+name: Python Install Paths
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'generate_parameter_library_py/**'
+      - 'example_python/**'
+      - '.github/workflows/python-install-paths.yaml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'generate_parameter_library_py/**'
+      - 'example_python/**'
+      - '.github/workflows/python-install-paths.yaml'
+
+concurrency:
+  # cancel previous runs of the same workflow, except for pushes on given branches
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads') }}
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        ROS_DISTRO: [humble, rolling]
+        build: ['', '--symlink-install']
+    runs-on: ubuntu-latest
+    container: ros:${{ matrix.ROS_DISTRO }}-ros-base
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+          sparse-checkout: |
+            generate_parameter_library_py
+            example_python
+
+      - name: rosdep install
+        run: |
+          apt-get update
+          rosdep update
+          # generate_parameter_library (C++) isn't needed to test these two packages.
+          rosdep install --from-paths src --ignore-src -y \
+            --skip-keys generate_parameter_library
+
+      - name: colcon build
+        shell: bash
+        run: |
+          source /opt/ros/${{ matrix.ROS_DISTRO }}/setup.bash
+          colcon build ${{ matrix.build }} --packages-up-to generate_parameter_module_example
+
+      - name: colcon test
+        shell: bash
+        run: |
+          source /opt/ros/${{ matrix.ROS_DISTRO }}/setup.bash
+          colcon test --packages-select generate_parameter_module_example generate_parameter_library_py
+          colcon test-result --verbose
