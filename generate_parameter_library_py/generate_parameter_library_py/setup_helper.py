@@ -55,14 +55,20 @@ def _resolve_package(distribution, package, yaml_file):
     )
 
 
+def _output_file(command, spec, package_root):
+    """Return the resolved package of spec and the path its module is written to."""
+    module_name, yaml_file, _, package = spec
+    package = _resolve_package(command.distribution, package, yaml_file)
+    return package, os.path.join(package_root(package), module_name + '.py')
+
+
 def _generate(command, specs, package_root, add_missing_init):
     """Generate every spec into package_root(package) and return the written files."""
     source_dir = _source_dir(command.distribution)
     outputs = []
-    for module_name, yaml_file, validation_module, package in specs:
-        package = _resolve_package(command.distribution, package, yaml_file)
-        output_dir = package_root(package)
-        output_file = os.path.join(output_dir, module_name + '.py')
+    for spec in specs:
+        _, yaml_file, validation_module, _ = spec
+        package, output_file = _output_file(command, spec, package_root)
         source_init = os.path.join(
             source_dir, command.get_package_dir(package), '__init__.py'
         )
@@ -100,7 +106,9 @@ def parameter_cmdclass(
     Regular builds generate into the build tree, so the module is installed
     with the rest of the package. Editable installs (``colcon build
     --symlink-install``, ``pip install -e``) generate into the source package,
-    which is the copy Python imports in that mode.
+    which is the copy Python imports in that mode; ``develop --uninstall``,
+    which colcon runs when such a build is rebuilt without
+    ``--symlink-install``, removes them from there again.
     """
     if modules is None:
         modules = [
@@ -157,12 +165,18 @@ def parameter_cmdclass(
     class Develop(develop):
         def run(self):
             build_py_cmd = self.get_finalized_command('build_py')
-            _generate(
-                build_py_cmd,
-                specs,
-                _source_package_root(build_py_cmd),
-                add_missing_init=False,
-            )
+            package_root = _source_package_root(build_py_cmd)
+            if self.uninstall:
+                # colcon runs `develop --uninstall` when a --symlink-install
+                # build is rebuilt without it; a module left in the source tree
+                # would shadow the installed one wherever the source is on
+                # sys.path, e.g. in `colcon test`.
+                for spec in specs:
+                    _, output_file = _output_file(build_py_cmd, spec, package_root)
+                    if os.path.exists(output_file):
+                        os.remove(output_file)
+            else:
+                _generate(build_py_cmd, specs, package_root, add_missing_init=False)
             super().run()
 
     return {'build_py': BuildPy, 'develop': Develop}

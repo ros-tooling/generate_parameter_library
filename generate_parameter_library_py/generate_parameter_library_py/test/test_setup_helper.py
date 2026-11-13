@@ -211,6 +211,21 @@ def test_develop_generates_into_source_without_init(tmp_path):
     assert default_frame(root) == 'probe_frame'
 
 
+def test_develop_uninstall_removes_generated_module_from_source(tmp_path):
+    # colcon runs `setup.py develop --uninstall` when a package that was built
+    # with --symlink-install is rebuilt without it. A module left in the source
+    # tree would then shadow the installed one whenever the source is on
+    # sys.path, e.g. during `colcon test`.
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    prefix = str(tmp_path / 'prefix')
+    run_setup(root, 'develop', '--prefix', prefix, '--no-deps')
+    assert os.path.isfile(os.path.join(root, 'probe', 'probe_parameters.py'))
+
+    run_setup(root, 'develop', '--uninstall', '--prefix', prefix)
+
+    assert sorted(os.listdir(os.path.join(root, 'probe'))) == ['parameters.yaml']
+
+
 MULTI_MODULE_SETUP_PY = """from setuptools import setup
 
 from generate_parameter_library_py.setup_helper import parameter_cmdclass
