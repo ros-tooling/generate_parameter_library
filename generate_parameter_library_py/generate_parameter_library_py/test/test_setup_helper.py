@@ -211,6 +211,22 @@ def test_develop_generates_into_source_without_init(tmp_path):
     assert default_frame(root) == 'probe_frame'
 
 
+def test_develop_src_layout(tmp_path):
+    # Regression test for #192 with --symlink-install: the package lives under
+    # src/, so the module must be generated next to it, not in the project root.
+    root = write_package(
+        str(tmp_path / 'src'),
+        'src/probe/parameters.yaml',
+        init_content='VALUE = 2\n',
+        package_dir='src',
+    )
+    run_setup(root, 'develop', '--prefix', str(tmp_path / 'prefix'), '--no-deps')
+
+    assert os.path.isfile(os.path.join(root, 'src', 'probe', 'probe_parameters.py'))
+    assert default_frame(os.path.join(root, 'src')) == 'probe_frame'
+    assert read(os.path.join(root, 'src', 'probe', '__init__.py')) == 'VALUE = 2\n'
+
+
 def test_develop_uninstall_removes_generated_module_from_source(tmp_path):
     # colcon runs `setup.py develop --uninstall` when a package that was built
     # with --symlink-install is rebuilt without it. A module left in the source
