@@ -279,6 +279,28 @@ Note that any fixed size type will automatically use a `size_lt` validator. Vali
 
 The purpose of the `none` type is purely documentation, and won't generate any C++ code. See [Parameter documentation](#parameter-documentation) for details.
 
+### Math expressions
+
+Numeric defaults and validator arguments can use quoted `${...}` expressions:
+
+```yaml
+my_node:
+  max_angle:
+    type: double
+    default_value: "${pi/2}"
+    validation:
+      bounds<>: ["${-pi}", "${pi}"]
+```
+
+Expressions support numeric literals, `pi`, `tau`, `e`, parentheses, unary `+`
+and `-`, and the operators `+`, `-`, `*`, `/`, `//` (floor division), and `%`.
+They are evaluated during generation for C++, Python, Markdown, and RST output.
+Numeric array elements (including fixed-size arrays) can also use expressions.
+Integer parameters require integer results; use `//` for integer division.
+String parameters and descriptive text remain literal. Function calls, attribute
+access, and other Python syntax are not supported. Invalid expressions and
+non-finite results produce generation errors naming the parameter.
+
 ### Built-In Validators
 Validators are C++ functions that take arguments represented by a key-value pair in yaml.
 The key is the name of the function.
