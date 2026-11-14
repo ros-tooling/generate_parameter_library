@@ -1,6 +1,6 @@
 if not self.node_.has_parameter(self.prefix_ + "{{parameter_name}}"):
 {%- filter indent(width=4) %}
-descriptor = ParameterDescriptor(description=r"{{parameter_description|valid_string_python}}", read_only = {{parameter_read_only}})
+descriptor = ParameterDescriptor(description="{{parameter_description|valid_string_python}}", read_only = {{parameter_read_only}})
 {%- if parameter_additional_constraints|length %}
 descriptor.additional_constraints = "{{parameter_additional_constraints|valid_string_python}}"
 {% endif -%}

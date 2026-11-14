@@ -88,3 +88,44 @@ def test_cpp_header_keeps_text_defaults(tmp_path):
     )
     assert names is not None, 'no complete initializer for names'
     assert [json.loads(n) for n in re.findall(CPP_STRING, names.group(1))] == NAMES
+
+
+DESCRIBED = r"""
+escaping_test:
+  path:
+    type: string
+    default_value: ''
+    description: 'say "hi" and end with a backslash \'
+    additional_constraints: 'match \d+ "digits"'
+"""
+
+
+def descriptor_texts(source):
+    """Collect the description and additional_constraints the generated module sets."""
+    texts = {}
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and getattr(node.func, 'id', '') == (
+            'ParameterDescriptor'
+        ):
+            for keyword in node.keywords:
+                if keyword.arg == 'description':
+                    texts['description'] = ast.literal_eval(keyword.value)
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Attribute)
+            and node.targets[0].attr == 'additional_constraints'
+        ):
+            texts['additional_constraints'] = ast.literal_eval(node.value)
+    return texts
+
+
+def test_python_module_keeps_descriptions(tmp_path):
+    definition = tmp_path / 'parameters.yaml'
+    definition.write_text(DESCRIBED)
+    output = tmp_path / 'escaping_test.py'
+    run_python(str(output), str(definition), '')
+
+    assert descriptor_texts(output.read_text()) == {
+        'description': 'say "hi" and end with a backslash \\',
+        'additional_constraints': 'match \\d+ "digits"',
+    }
