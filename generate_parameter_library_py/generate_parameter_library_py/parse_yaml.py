@@ -1037,9 +1037,14 @@ class GenerateCode:
             self.declare_parameter_sets.append(declare_parameter_set)
 
     def parse_dict(self, name, root_map, nested_name):
-        if isinstance(root_map, dict) and isinstance(
-            next(iter(root_map.values())), dict
-        ):
+        # A string `type` marks a parameter whatever order its fields are in,
+        # while a group only holds mappings (possibly a parameter named `type`).
+        is_group = (
+            isinstance(root_map, dict)
+            and not isinstance(root_map.get('type'), str)
+            and any(isinstance(value, dict) for value in root_map.values())
+        )
+        if is_group:
             cur_struct_tree = self.struct_tree
             cur_stack_struct_tree = self.stack_struct_tree
 
