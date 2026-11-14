@@ -101,7 +101,7 @@ class ParameterValidators:
     def element_bounds(param, lower, upper):
         for val in param.value:
             if val > upper or val < lower:
-                return f"Value {param.value} in parameter '{param.name}' must be within bounds [{lower}, {upper}]"
+                return f"Value {val} in parameter '{param.name}' must be within bounds [{lower}, {upper}]"
         return ''
 
     def lower_element_bounds(param, lower):
@@ -113,7 +113,7 @@ class ParameterValidators:
     def upper_element_bounds(param, upper):
         for val in param.value:
             if val > upper:
-                return f"Value {val} in parameter '{param.name}' must be above lower bound of {upper}"
+                return f"Value {val} in parameter '{param.name}' must be below upper bound of {upper}"
         return ''
 
     def bounds(param, lower, upper):
