@@ -38,8 +38,8 @@ from generate_parameter_library_py.parse_yaml import GenerateCode
 def run(output_file, yaml_file, validation_module='', create_init=True):
     print(f'Running {__file__} {output_file} {yaml_file} {validation_module}')
     gen_param_struct = GenerateCode('python')
-    output_dir = os.path.dirname(output_file)
-    os.makedirs(output_dir, exist_ok=True)
+    # A bare file name has no directory part and goes to the current directory.
+    os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
 
     gen_param_struct.parse(yaml_file, validation_module)
 

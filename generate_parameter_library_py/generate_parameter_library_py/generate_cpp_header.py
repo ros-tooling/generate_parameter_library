@@ -37,9 +37,8 @@ from generate_parameter_library_py.parse_yaml import GenerateCode
 
 def run(output_file, yaml_file, validate_header=''):
     gen_param_struct = GenerateCode('cpp')
-    output_dir = os.path.dirname(output_file)
-    if not os.path.isdir(output_dir):
-        os.makedirs(output_dir)
+    # A bare file name has no directory part and goes to the current directory.
+    os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
 
     gen_param_struct.parse(yaml_file, validate_header)
 
