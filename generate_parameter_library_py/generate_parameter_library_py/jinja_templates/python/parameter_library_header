@@ -95,9 +95,6 @@ self.stamp_ = Time()
         def refresh_dynamic_parameters(self):
             updated_params = self.get_params()
             # TODO remove any destroyed dynamic parameters
-{%- filter indent(width=6) %}
-{{remove_dynamic_parameters}}
-{%- endfilter %}
             # declare any new dynamic parameters
 {%- filter indent(width=12) %}
 {{update_declare_dynamic_parameters}}

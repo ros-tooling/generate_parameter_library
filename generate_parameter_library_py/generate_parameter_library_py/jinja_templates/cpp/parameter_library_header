@@ -171,9 +171,6 @@ struct StackParams {
     void refresh_dynamic_parameters() {
       auto updated_params = get_params();
       // TODO remove any destroyed dynamic parameters
-{%- filter indent(width=6) %}
-{{remove_dynamic_parameters}}
-{%- endfilter %}
       // declare any new dynamic parameters
       rclcpp::Parameter param;
 {%- filter indent(width=6) %}

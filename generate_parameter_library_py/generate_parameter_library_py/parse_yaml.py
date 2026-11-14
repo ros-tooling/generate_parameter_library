@@ -754,37 +754,6 @@ class DeclareRuntimeParameter(DeclareParameterBase):
         return code
 
 
-class RemoveRuntimeParameter:
-    @typechecked
-    def __init__(self, dynamic_declare_parameter: DeclareRuntimeParameter):
-        self.dynamic_declare_parameter = dynamic_declare_parameter
-
-    def __str__(self):
-        parameter_map = get_dynamic_parameter_map(
-            self.dynamic_declare_parameter.parameter_name
-        )
-        parameter_map = parameter_map.split('.')
-        struct_name = get_dynamic_struct_name(
-            self.dynamic_declare_parameter.parameter_name
-        )
-        parameter_field = get_dynamic_parameter_field(
-            self.dynamic_declare_parameter.parameter_name
-        )
-        mapped_params = self.dynamic_declare_parameter.mapped_params
-
-        data = {
-            'parameter_map': parameter_map,
-            'mapped_params': mapped_params,
-            'dynamic_declare_parameter': str(self.dynamic_declare_parameter),
-            'struct_name': struct_name,
-            'parameter_field': parameter_field,
-        }
-
-        j2_template = Template(GenerateCode.templates['remove_runtime_parameter'])
-        code = j2_template.render(data, trim_blocks=True)
-        return code
-
-
 def get_all_templates(language: str):
     template_lang_path = os.path.join(
         os.path.dirname(__file__), 'jinja_templates', language
@@ -908,7 +877,6 @@ class GenerateCode:
         self.declare_dynamic_parameters = []
         self.update_dynamic_parameters = []
         self.update_declare_dynamic_parameter = []
-        self.remove_dynamic_parameter = []
         self.declare_parameter_sets = []
         self.set_stack_params = []
         self.user_validation_file = ''
@@ -1029,8 +997,6 @@ class GenerateCode:
             self.declare_dynamic_parameters.append(declare_parameter)
             self.update_dynamic_parameters.append(update_parameter)
             self.update_declare_dynamic_parameter.append(declare_parameter)
-            dynamic_update_parameter = RemoveRuntimeParameter(declare_parameter)
-            self.remove_dynamic_parameter.append(dynamic_update_parameter)
         else:
             self.declare_parameters.append(declare_parameter)
             self.update_parameters.append(update_parameter)
@@ -1094,10 +1060,6 @@ class GenerateCode:
                 [str(x) for x in self.update_declare_dynamic_parameter]
             ),
             'set_stack_params': '\n'.join([str(x) for x in self.set_stack_params]),
-            # TODO support removing runtime parameters
-            # "remove_dynamic_parameters": "\n".join(
-            #     [str(x) for x in self.remove_dynamic_parameter]
-            # ),
         }
 
         j2_template = Template(
