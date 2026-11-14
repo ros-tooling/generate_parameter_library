@@ -526,7 +526,7 @@ If you try to set a value out of the specified bounds,
 
 you will get the error
 
-`Setting parameter failed: Value array('d', [-10.0, -10.0, -10.0, -10.0, -10.0, -10.0]) in parameter 'admittance.damping_ratio' must be within bounds [0.1, 10.0]`
+`Setting parameter failed: Value -10.0 in parameter 'admittance.damping_ratio' must be within bounds [0.1, 10.0]`
 
 If you try to set a vector parameter with the wrong length,
 
