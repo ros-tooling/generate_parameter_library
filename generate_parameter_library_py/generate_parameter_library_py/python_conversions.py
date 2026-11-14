@@ -29,12 +29,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from typing import List, Union
-from jinja2 import Template
 from typeguard import typechecked
-import os
-import yaml
-from yaml.parser import ParserError
-from yaml.scanner import ScannerError
 
 
 class PythonConversions:
@@ -64,7 +59,6 @@ class PythonConversions:
             'double': 'value',
             'int': 'value',
             'bool': 'value',
-            'bool_array_fixed': 'value',
             'double_array_fixed': 'value',
             'int_array_fixed': 'value',
             'string_array_fixed': 'value',
@@ -80,11 +74,10 @@ class PythonConversions:
             'double_array': self.float_array_to_str,
             'int_array': self.int_array_to_str,
             'string_array': self.str_array_to_str,
-            'bool_array_fixed': self.bool_array_fixed_to_str,
-            'double_array_fixed': self.float_array_fixed_to_str,
-            'int_array_fixed': self.int_array_fixed_to_str,
-            'string_array_fixed': self.str_array_fixed_to_str,
-            'string_fixed': self.str_fixed_to_str,
+            'double_array_fixed': self.float_array_to_str,
+            'int_array_fixed': self.int_array_to_str,
+            'string_array_fixed': self.str_array_to_str,
+            'string_fixed': self.str_to_str,
         }
         self.python_val_to_str_func = {
             "<class 'bool'>": self.bool_to_str,
@@ -198,33 +191,3 @@ class PythonConversions:
         if s is None:
             return ''
         return '[' + ', '.join(self.str_to_str(x) for x in s) + ']'
-
-    @typechecked
-    def str_array_fixed_to_str(self, s: Union[None, list]):
-        if s is None:
-            return ''
-        return '[' + ', '.join(self.str_to_str(x) for x in s) + ']'
-
-    @typechecked
-    def str_fixed_to_str(self, s: Union[None, str]):
-        if s is None:
-            return ''
-        return '%s' % self.str_to_str(s)
-
-    @typechecked
-    def float_array_fixed_to_str(self, values: Union[None, list]):
-        if values is None:
-            return ''
-        return '[' + ', '.join(self.float_to_str(x) for x in values) + ']'
-
-    @typechecked
-    def int_array_fixed_to_str(self, values: Union[None, list]):
-        if values is None:
-            return ''
-        return '[' + ', '.join(self.int_to_str(x) for x in values) + ']'
-
-    @typechecked
-    def bool_array_fixed_to_str(self, values: Union[None, list]):
-        if values is None:
-            return ''
-        return '[' + ', '.join(self.bool_to_str(x) for x in values) + ']'
