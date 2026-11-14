@@ -321,12 +321,23 @@ class CodeGenVariableBase:
         func = self.conversion.defined_type_to_lang_type[self.defined_base_type]
         self.lang_base_type = func(self.defined_base_type, template)
         func = self.conversion.lang_str_value_func[self.defined_type]
+
+        def incorrect_type():
+            return compile_error(
+                f'Parameter {param_name} has incorrect type. Expected: {defined_type}, got: {self.get_yaml_type_from_python(default_value)}'
+            )
+
+        # YAML bools are Python ints, so the type check of the numeric
+        # conversions accepts them and they would be written as `True`.
+        values = default_value if isinstance(default_value, list) else [default_value]
+        if self.defined_base_type in ('int', 'double') and any(
+            isinstance(value, bool) for value in values
+        ):
+            raise incorrect_type()
         try:
             self.lang_str_value = func(default_value)
         except TypeCheckError:
-            raise compile_error(
-                f'Parameter {param_name} has incorrect type. Expected: {defined_type}, got: {self.get_yaml_type_from_python(default_value)}'
-            )
+            raise incorrect_type()
 
     def parameter_as_function_str(self):
         if self.defined_type not in self.conversion.yaml_type_to_as_function:
@@ -338,9 +349,11 @@ class CodeGenVariableBase:
 
     def get_yaml_type_from_python(self, arg):
         if isinstance(arg, list):
+            if not arg:
+                return 'empty array'
             return self.conversion.python_list_to_yaml_type[str(type(arg[0]))]
         else:
-            return self.conversion.python_val_to_yaml_type[str(type(arg[0]))]
+            return self.conversion.python_val_to_yaml_type[str(type(arg))]
 
     def process_type(self, defined_type):
         raise NotImplemented()
