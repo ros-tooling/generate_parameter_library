@@ -29,12 +29,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 from typing import List, Union
-from jinja2 import Template
 from typeguard import typechecked
-import os
-import yaml
-from yaml.parser import ParserError
-from yaml.scanner import ScannerError
 
 
 class CPPConversions:
@@ -64,7 +59,6 @@ class CPPConversions:
             'double': 'as_double()',
             'int': 'as_int()',
             'bool': 'as_bool()',
-            'bool_array_fixed': 'as_bool_array()',
             'double_array_fixed': 'as_double_array()',
             'int_array_fixed': 'as_integer_array()',
             'string_array_fixed': 'as_string_array()',
@@ -80,7 +74,6 @@ class CPPConversions:
             'double_array': self.float_array_to_str,
             'int_array': self.int_array_to_str,
             'string_array': self.str_array_to_str,
-            'bool_array_fixed': self.bool_array_fixed_to_str,
             'double_array_fixed': self.float_array_fixed_to_str,
             'int_array_fixed': self.int_array_fixed_to_str,
             'string_array_fixed': self.str_array_fixed_to_str,
@@ -223,9 +216,3 @@ class CPPConversions:
         if values is None:
             return ''
         return '{{' + ', '.join(self.int_to_str(x) for x in values) + '}}'
-
-    @typechecked
-    def bool_array_fixed_to_str(self, values: Union[None, list]):
-        if values is None:
-            return ''
-        return '{{' + ', '.join(self.bool_to_str(x) for x in values) + '}}'
