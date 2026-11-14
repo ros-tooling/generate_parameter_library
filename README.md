@@ -167,18 +167,18 @@ int main(int argc, char * argv[])
 ```python
 import rclpy
 from rclpy.node import Node
-from turtlesim_pkg.turtlesim_parameters import turtlesim_parameters
+from turtlesim.turtlesim_parameters import turtlesim
 
 def main(args=None):
   rclpy.init(args=args)
   node = Node("turtlesim")
-  param_listener = turtlesim_parameters.ParamListener(node)
+  param_listener = turtlesim.ParamListener(node)
   params = param_listener.get_params()
 
   color = params.background
   node.get_logger().info(
     "Background color (r,g,b): %d, %d, %d" %
-    color.r, color.g, color.b)
+    (color.r, color.g, color.b))
 ```
 
 ### Use example yaml files in tests
