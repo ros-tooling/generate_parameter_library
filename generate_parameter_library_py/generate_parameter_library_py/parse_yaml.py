@@ -299,7 +299,6 @@ class CodeGenVariableBase:
 
         self.name = name
         self.default_value = default_value
-        self.name = name
         self.param_name = param_name
         # Size of a fixed size type, set by CodeGenFixedVariable.process_type.
         self.fixed_size = None
@@ -343,10 +342,10 @@ class CodeGenVariableBase:
             return self.conversion.python_val_to_yaml_type[str(type(arg[0]))]
 
     def process_type(self, defined_type):
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def get_parameter_type(self):
-        raise NotImplemented()
+        raise NotImplementedError()
 
 
 class CodeGenVariable(CodeGenVariableBase):
@@ -860,7 +859,7 @@ class GenerateCode:
             self.comments = '.. auto-generated DO NOT EDIT'
         elif language == 'markdown':
             self.comments = '<!--- auto-generated DO NOT EDIT -->'
-        elif language == 'python' or language == 'markdown':
+        elif language == 'python':
             self.comments = '# auto-generated DO NOT EDIT'
         else:
             raise compile_error(

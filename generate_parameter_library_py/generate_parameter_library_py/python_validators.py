@@ -59,7 +59,6 @@ class ParameterValidators:
 
     def not_empty(param):
         if len(param.value) == 0:
-            tmp = 'above lower bound of'
             return f"Parameter '{param.name}' cannot be empty"
         return ''
 
