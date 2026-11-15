@@ -28,9 +28,13 @@
 
 import sys
 import os
+import shutil
 
 from setuptools.command.build_py import build_py
 from setuptools.command.develop import develop
+
+# after setuptools, which provides distutils on Python >= 3.12
+from distutils.command.install_data import install_data  # noqa: I100
 
 from generate_parameter_library_py.generate_python_module import run
 
@@ -106,6 +110,51 @@ def _replace_outputs(command, kind, outputs):
         f.write('\n'.join(outputs))
 
 
+def _install_definitions(command, specs, link):
+    """Install every definition as share/<distribution>/parameter_definitions/<module>.yaml.
+
+    Like generate_parameter_library() in CMake, so that tools such as
+    generate_parameter_library_validate find it for binary and underlay
+    installs. data_files cannot rename, so each definition is placed under its
+    installed name in the build tree first: a link to the real source for
+    editable installs, which colcon --symlink-install installs as a link, else
+    a copy of it.
+    """
+    source_dir = _source_dir(command.distribution)
+    stage = os.path.abspath(
+        os.path.join(
+            command.get_finalized_command('build').build_base,
+            'parameter_definitions',
+        )
+    )
+    os.makedirs(stage, exist_ok=True)
+    staged = []
+    for module_name, yaml_file, _, _ in specs:
+        source = os.path.realpath(os.path.join(source_dir, yaml_file))
+        target = os.path.join(stage, module_name + '.yaml')
+        if os.path.lexists(target):
+            os.remove(target)
+        if link:
+            os.symlink(source, target)
+        else:
+            shutil.copyfile(source, target)
+        staged.append(target)
+    entry = (
+        os.path.join('share', command.distribution.get_name(), 'parameter_definitions'),
+        staged,
+    )
+    distribution = command.distribution
+    if distribution.data_files is None:
+        distribution.data_files = []
+    if entry not in distribution.data_files:
+        distribution.data_files.append(entry)
+    # data commands given on the command line, e.g. colcon's symlink_data, were
+    # created with the data_files of before, None if setup() gave none
+    for other in distribution.command_obj.values():
+        if isinstance(other, install_data) and other.data_files is None:
+            other.data_files = distribution.data_files
+
+
 def _source_package_root(command):
     source_dir = _source_dir(command.distribution)
     return lambda pkg: os.path.join(source_dir, command.get_package_dir(pkg))
@@ -167,6 +216,7 @@ def parameter_cmdclass(
                     self, specs, _source_package_root(self), add_missing_init=False
                 )
                 _replace_outputs(self, 'source', generated)
+                _install_definitions(self, specs, link=True)
                 return
             self._generated = _generate(
                 self,
@@ -175,6 +225,7 @@ def parameter_cmdclass(
                 add_missing_init=True,
             )
             _replace_outputs(self, 'build_lib', self._generated)
+            _install_definitions(self, specs, link=False)
 
         def get_source_files(self):
             # sdist collects its pure-Python inputs from here.
@@ -206,6 +257,7 @@ def parameter_cmdclass(
                     build_py_cmd, specs, package_root, add_missing_init=False
                 )
                 _replace_outputs(build_py_cmd, 'source', generated)
+                _install_definitions(build_py_cmd, specs, link=True)
             super().run()
 
     return {'build_py': BuildPy, 'develop': Develop}
@@ -254,4 +306,13 @@ def generate_parameter_module(
     if install_dir:
         run(
             os.path.join(install_dir, module_name + '.py'), yaml_file, validation_module
+        )
+        # see _install_definitions()
+        definitions_dir = os.path.join(
+            install_base, 'share', pkg_name, 'parameter_definitions'
+        )
+        os.makedirs(definitions_dir, exist_ok=True)
+        shutil.copyfile(
+            os.path.realpath(yaml_file),
+            os.path.join(definitions_dir, module_name + '.yaml'),
         )

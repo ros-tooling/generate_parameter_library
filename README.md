@@ -709,11 +709,12 @@ can gate a pipeline:
       --strict
 ```
 
-The CMake functions `generate_parameter_library()` and
-`generate_parameter_module()` install each definition as
-`share/<package>/parameter_definitions/<library name>.yaml`, so a configuration
-can also be checked against a package installed from binaries or in an
-underlay, without its source:
+Packages install each definition as
+`share/<package>/parameter_definitions/<name>.yaml`, so a configuration can also
+be checked against a package installed from binaries or in an underlay, without
+its source. `<name>` is the library name given to `generate_parameter_library()`
+or `generate_parameter_module()` in CMake, or the module name given to
+`parameter_cmdclass()` or `generate_parameter_module()` in `setup.py`:
 
 ```bash
 generate_parameter_library_validate \
