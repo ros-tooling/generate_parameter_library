@@ -668,6 +668,23 @@ matches its name, in the order of the files and then of the sections in a file,
 so a later section overrides an earlier one. A section whose node name is a
 wildcard is only checked on its own when no file names a node.
 
+Pass `--node` with the name of the node that loads the files, as `my_node` or
+`/ns/my_node`, to check only that node. It is checked with the values of every
+section that applies to it, including wildcard sections, even if no section
+names it, and sections of other nodes in the same files are left out. This
+fits files shared by several nodes, such as a ros2_control configuration with
+several controllers, where the definition's root element is not the node name.
+A single definition is then used for the given node, and a node that no
+section applies to is an error, as the name is most likely misspelled. `--node` may be given more than once.
+
+```bash
+generate_parameter_library_validate \
+  --param-definition src/joint_trajectory_controller_parameters.yaml \
+  --config config/controllers_common.yaml \
+  --config config/arm_controller.yaml \
+  --node arm_controller
+```
+
 Without further options the tool reports what makes a node fail to start or
 behave unexpectedly:
 

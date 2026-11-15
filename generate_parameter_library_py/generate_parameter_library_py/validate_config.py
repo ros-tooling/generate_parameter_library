@@ -582,6 +582,7 @@ def stand_in_node(section: str) -> str:
 
 def effective_sections(
     sections: List[Tuple[str, str, Dict[str, Any]]],
+    node_names: Optional[List[str]] = None,
 ) -> List[Tuple[str, str, Dict[str, Any]]]:
     """Return the values each node described by the files receives at runtime.
 
@@ -594,17 +595,26 @@ def effective_sections(
     when the node name is not pinned. Sections that name the same node, such
     as `/ns/ctrl` and `ns: {ctrl: ...}`, are validated once, reported at the
     first file that names it.
+
+    With `node_names`, exactly these nodes are returned instead, each with the
+    values of every section that applies to it, and with the file of the first
+    such section, or '' when none applies.
     """
-    nodes = [s for s in sections if not is_wildcard_node(s[1])] or sections
     targets: Dict[str, Tuple[str, str]] = {}
-    for path, name, _ in nodes:
-        targets.setdefault(stand_in_node(name), (path, name))
+    if node_names is None:
+        nodes = [s for s in sections if not is_wildcard_node(s[1])] or sections
+        for path, name, _ in nodes:
+            targets.setdefault(stand_in_node(name), (path, name))
+    else:
+        for name in node_names:
+            targets.setdefault(fully_qualified(name), ('', name))
     effective = []
     for node_fqn, (path, name) in targets.items():
         values: Dict[str, Any] = {}
-        for _, other, tree in sections:
+        for other_path, other, tree in sections:
             if section_matches(other, node_fqn):
                 values.update(flatten(tree))
+                path = path or other_path
         effective.append((path, name, values))
     return effective
 
@@ -824,17 +834,25 @@ def validate(
     definition_paths: List[str],
     config_paths: List[str],
     strict: bool = False,
+    nodes: Optional[List[str]] = None,
 ) -> List[Diagnostic]:
     """Validate the configs against the definitions whose namespace matches.
 
     The configs are merged in the given order, as the parameter files of one
     node are by rclcpp, so a later file overrides an earlier one. A file
     without any `ros__parameters` key holds no node name and is validated on
-    its own.
+    its own. With `nodes`, only these nodes are validated, with the values of
+    every section that applies to them, and a single definition is used for
+    them even if other sections match it by name. A given node that no section
+    applies to is an error, as it is most likely a misspelled name.
     """
+    for name in nodes or []:
+        if '*' in name:
+            raise ConfigError(f'--node {name}: give a node name, not a wildcard')
     diagnostics = []
     configs = [(path, read_config(path)) for path in config_paths]
     used = {node_name_of(name) for _, sections in configs for name in sections}
+    used |= {node_name_of(name) for name in nodes or []}
     definitions, unused, duplicates = load_definitions(definition_paths, used)
     single_definition = len(definition_paths) == 1
 
@@ -860,14 +878,23 @@ def validate(
         if '' not in sections
         for name, tree in sections.items()
     ]
-    nodes = plain + effective_sections(named)
-    matched = any(node_name_of(name) in definitions for _, name, _ in nodes)
-    for config_path, section_name, values in nodes:
+    targets = plain + effective_sections(named, nodes)
+    matched = any(node_name_of(name) in definitions for _, name, _ in targets)
+    for config_path, section_name, values in targets:
+        if nodes and not config_path:
+            diagnostics.append(
+                Diagnostic(
+                    ERROR,
+                    section_name,
+                    'no configuration section applies to this node, check the '
+                    'node name',
+                )
+            )
         node_name = node_name_of(section_name)
         if node_name in definitions:
             generator = definitions[node_name]
         # a plain file names no node, so a match in another file says nothing about it
-        elif single_definition and (section_name == '' or not matched):
+        elif single_definition and (nodes or section_name == '' or not matched):
             generator = next(iter(definitions.values()))
         else:
             diagnostics.append(
@@ -906,6 +933,15 @@ def parse_args(argv=None):
         'overrides an earlier one',
     )
     parser.add_argument(
+        '--node',
+        action='append',
+        metavar='NAME',
+        help='validate only this node, as `my_node` or `/ns/my_node`, with '
+        'the values of every section that applies to it, including wildcard '
+        'sections; may be given more than once. Without it, every node a '
+        'section names is validated',
+    )
+    parser.add_argument(
         '--strict',
         action='store_true',
         help='also report parameters that no definition declares and '
@@ -917,7 +953,9 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     try:
-        diagnostics = validate(args.param_definition, args.config, args.strict)
+        diagnostics = validate(
+            args.param_definition, args.config, args.strict, args.node
+        )
     except ConfigError as error:
         print(f'{ERROR}: {error}', file=sys.stderr)
         return 1

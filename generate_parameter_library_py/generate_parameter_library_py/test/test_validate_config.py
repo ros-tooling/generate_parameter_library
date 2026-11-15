@@ -479,6 +479,80 @@ def test_config_files_are_merged_in_order(workspace, definition):
     assert len(errors(validate([definition], [common]))) == 1
 
 
+TWO_NODES = """/**:
+  ros__parameters:
+    rate: 20.0
+first_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+other_node:
+  ros__parameters:
+    rate: -1.0
+"""
+
+
+def test_node_option_checks_only_that_node(workspace, definition):
+    """Sections of other nodes in the same files are left out.
+
+    No section is named after the definition, as for ros2_control controllers.
+    """
+    config = write(workspace, 'config.yaml', TWO_NODES)
+    # without --node, the single definition is also applied to other_node
+    assert errors(validate([definition], [config])) != []
+    assert errors(validate([definition], [config], nodes=['first_node'])) == []
+    found = errors(validate([definition], [config], nodes=['/other_node']))
+    assert sorted(d.location for d in found) == [
+        '/other_node.mandatory_gain',
+        '/other_node.rate',
+    ]
+
+
+def test_node_option_checks_a_node_that_only_wildcards_apply_to(workspace, definition):
+    """A launched node that no section names still gets the wildcard sections."""
+    config = write(workspace, 'config.yaml', TWO_NODES)
+    found = errors(validate([definition], [config], nodes=['third_node']))
+    assert [d.location for d in found] == ['third_node.mandatory_gain']
+    assert not any(
+        'applies to' in m
+        for m in messages(validate([definition], [config], nodes=['third_node']))
+    )
+
+
+def test_node_option_matches_namespaces(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """robot:
+  arm:
+    my_node:
+      ros__parameters:
+        mandatory_gain: 1.5
+""",
+    )
+    assert validate([definition], [config], nodes=['/robot/arm/my_node']) == []
+    diagnostics = validate([definition], [config], nodes=['my_node'])
+    # /my_node is not /robot/arm/my_node, most likely a misspelled name
+    assert [d.location for d in errors(diagnostics)] == [
+        'my_node',
+        'my_node.mandatory_gain',
+    ]
+    assert 'no configuration section applies' in errors(diagnostics)[0].message
+
+
+def test_node_option_rejects_wildcards(workspace, definition):
+    config = write(workspace, 'config.yaml', TWO_NODES)
+    code = main(['--param-definition', definition, '--config', config, '--node', '/**'])
+    assert code == 1
+
+
+def test_node_option_on_the_command_line(workspace, definition):
+    config = write(workspace, 'config.yaml', TWO_NODES)
+    args = ['--param-definition', definition, '--config', config]
+    assert main(args) == 1
+    assert main(args + ['--node', 'first_node']) == 0
+    assert main(args + ['--node', 'first_node', '--node', 'other_node']) == 1
+
+
 def test_none_typed_parameters_are_left_alone(workspace):
     """A parameter of type none is declared by other code, not by the node."""
     definition = write(
