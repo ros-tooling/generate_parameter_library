@@ -470,6 +470,7 @@ for joint in params.joints:
 - Keys that were removed are erased from the maps.
   Their parameters stay declared on the node, because rclcpp cannot undeclare statically typed parameters; the Python library behaves the same.
   If a key is added again, its entry is restored with the current parameter values.
+- Do not call `refresh_dynamic_parameters()` from a parameter callback such as the user callback: there the node has not stored the new values yet, and rclcpp rejects declaring parameters.
 
 #### Key array scope resolution
 
