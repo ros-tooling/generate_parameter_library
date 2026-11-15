@@ -562,31 +562,31 @@ def stand_in_node(section: str) -> str:
 
 
 def effective_sections(
-    sections: Dict[str, Dict[str, Any]],
-) -> List[Tuple[str, Dict[str, Any]]]:
-    """Return the values each node described by a file receives at runtime.
+    sections: List[Tuple[str, str, Dict[str, Any]]],
+) -> List[Tuple[str, str, Dict[str, Any]]]:
+    """Return the values each node described by the files receives at runtime.
 
+    `sections` holds the (file, name, parameters) of every section of every
+    configuration file, in the order the files are given and then file order.
     rclcpp applies every section whose name matches the node, wildcard or not,
-    in file order, so a later section wins over an earlier one. A section whose
-    node name is a wildcard describes no node of its own; it is only validated
-    when the file has no other section, the usual shape when the node name is
-    not pinned. Sections that name the same node, such as `/ns/ctrl` and
-    `ns: {ctrl: ...}`, are validated once.
+    in that order, so a later section, also one of a later file, wins over an
+    earlier one. A section whose node name is a wildcard describes no node of
+    its own; it is only validated when no file names a node, the usual shape
+    when the node name is not pinned. Sections that name the same node, such
+    as `/ns/ctrl` and `ns: {ctrl: ...}`, are validated once, reported at the
+    first file that names it.
     """
-    if '' in sections:
-        return [('', flatten(sections['']))]
-    names = list(sections)
-    nodes = [name for name in names if not is_wildcard_node(name)] or names
-    targets: Dict[str, str] = {}
-    for name in nodes:
-        targets.setdefault(stand_in_node(name), name)
+    nodes = [s for s in sections if not is_wildcard_node(s[1])] or sections
+    targets: Dict[str, Tuple[str, str]] = {}
+    for path, name, _ in nodes:
+        targets.setdefault(stand_in_node(name), (path, name))
     effective = []
-    for node_fqn, name in targets.items():
+    for node_fqn, (path, name) in targets.items():
         values: Dict[str, Any] = {}
-        for other in names:
+        for _, other, tree in sections:
             if section_matches(other, node_fqn):
-                values.update(flatten(sections[other]))
-        effective.append((name, values))
+                values.update(flatten(tree))
+        effective.append((path, name, values))
     return effective
 
 
@@ -736,7 +736,13 @@ def validate(
     config_paths: List[str],
     strict: bool = False,
 ) -> List[Diagnostic]:
-    """Validate every config against the definitions whose namespace matches."""
+    """Validate the configs against the definitions whose namespace matches.
+
+    The configs are merged in the given order, as the parameter files of one
+    node are by rclcpp, so a later file overrides an earlier one. A file
+    without any `ros__parameters` key holds no node name and is validated on
+    its own.
+    """
     diagnostics = []
     configs = [(path, read_config(path)) for path in config_paths]
     used = {node_name_of(name) for _, sections in configs for name in sections}
@@ -758,27 +764,31 @@ def validate(
             )
         )
 
-    for config_path, sections in configs:
-        nodes = effective_sections(sections)
-        matched = any(node_name_of(name) in definitions for name, _ in nodes)
-        for section_name, values in nodes:
-            node_name = node_name_of(section_name)
-            if node_name in definitions:
-                generator = definitions[node_name]
-            elif single_definition and not matched:
-                generator = next(iter(definitions.values()))
-            else:
-                diagnostics.append(
-                    Diagnostic(
-                        WARNING,
-                        f'{config_path}:{section_name}',
-                        'no parameter definition has this namespace, not checked',
-                    )
+    plain = [(path, '', flatten(s[''])) for path, s in configs if '' in s]
+    named = [
+        (path, name, tree)
+        for path, sections in configs
+        if '' not in sections
+        for name, tree in sections.items()
+    ]
+    nodes = plain + effective_sections(named)
+    matched = any(node_name_of(name) in definitions for _, name, _ in nodes)
+    for config_path, section_name, values in nodes:
+        node_name = node_name_of(section_name)
+        if node_name in definitions:
+            generator = definitions[node_name]
+        elif single_definition and not matched:
+            generator = next(iter(definitions.values()))
+        else:
+            diagnostics.append(
+                Diagnostic(
+                    WARNING,
+                    f'{config_path}:{section_name}',
+                    'no parameter definition has this namespace, not checked',
                 )
-                continue
-            diagnostics.extend(
-                validate_section(section_name, generator, values, strict)
             )
+            continue
+        diagnostics.extend(validate_section(section_name, generator, values, strict))
     return diagnostics
 
 
@@ -802,7 +812,8 @@ def parse_args(argv=None):
         required=True,
         metavar='FILE',
         help='a parameter configuration YAML to validate, may be given more '
-        'than once',
+        'than once; the files are merged in the given order, a later file '
+        'overrides an earlier one',
     )
     parser.add_argument(
         '--strict',

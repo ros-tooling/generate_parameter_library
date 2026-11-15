@@ -647,18 +647,26 @@ generate_parameter_library_validate \
   --config config/robot.yaml
 ```
 
-Pass `--param-definition` and `--config` more than once to check several
-definitions or several configuration files in one run. A configuration section
-is matched to the definition whose root element has the same name; when exactly
-one definition is given it is used for every section.
+Pass `--param-definition` more than once to check several definitions in one
+run. A configuration section is matched to the definition whose root element
+has the same name; when exactly one definition is given and no section matches
+it, it is used for every section.
+
+Pass `--config` more than once to check configuration files that are loaded
+together, as `parameters=[common.yaml, robot.yaml]` in a launch file or
+repeated `--params-file` arguments do. The files are merged in the given order,
+so a later file overrides an earlier one, and a node that gets a mandatory
+parameter from one file and the rest from another is checked as it starts.
+Configuration files that are not loaded together, for example those of
+different robots that use the same node name, are checked in separate runs.
 
 A configuration section may be written as `node:`, `/node:`, under any
 number of namespace levels, or with the wildcards `/*` (one level) and `/**`
 (any number of levels), as in `/**:` or `/robot/*/node:`, and a file may hold
 several nodes. As at runtime, a node receives the values of every section that
-matches its name, in file order, so a later section overrides an earlier one.
-A section whose node name is a wildcard is only checked on its own when the
-file names no node.
+matches its name, in the order of the files and then of the sections in a file,
+so a later section overrides an earlier one. A section whose node name is a
+wildcard is only checked on its own when no file names a node.
 
 Without further options the tool reports what makes a node fail to start or
 behave unexpectedly:

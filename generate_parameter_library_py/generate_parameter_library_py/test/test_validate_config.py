@@ -426,6 +426,36 @@ def test_wildcard_only_config_is_validated(workspace, definition):
     assert 'rate' in found[0].location
 
 
+def test_config_files_are_merged_in_order(workspace, definition):
+    """Several files are stacked like the parameter files of one node."""
+    common = write(
+        workspace,
+        'common.yaml',
+        """/**:
+  ros__parameters:
+    rate: -1.0
+    mandatory_gain: 1.5
+""",
+    )
+    override = write(
+        workspace,
+        'override.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 20.0
+""",
+    )
+    # mandatory_gain comes from the first file, the second overrides rate
+    assert errors(validate([definition], [common, override])) == []
+    # reversed, the wildcard section of the later file wins over my_node
+    found = errors(validate([definition], [override, common]))
+    assert len(found) == 1
+    assert found[0].location == 'my_node.rate'
+    # each file on its own is incomplete or invalid
+    assert len(errors(validate([definition], [override]))) == 1
+    assert len(errors(validate([definition], [common]))) == 1
+
+
 def test_none_typed_parameters_are_left_alone(workspace):
     """A parameter of type none is declared by other code, not by the node."""
     definition = write(
