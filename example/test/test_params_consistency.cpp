@@ -610,6 +610,18 @@ TEST_F(TestParamsConsistency, RefreshAddsKeysWhoseChildMapIsEmpty) {
   EXPECT_EQ(updated_params.nested_dynamic.joints_map.count(joint), 1u);
 }
 
+TEST_F(TestParamsConsistency, RefreshKeepsAValueTheNodeHasNotCommittedYet) {
+  // update() runs in the on-set callback, before the node stores the value:
+  // this is what a setter on another thread has done when refresh runs
+  const auto& joint = params_.joints.front();
+  param_listener_->update(
+      {rclcpp::Parameter(fmt::format("pid.{}.p", joint), 5.0)});
+  param_listener_->refresh_dynamic_parameters();
+
+  EXPECT_DOUBLE_EQ(param_listener_->get_params().pid.joints_map.at(joint).p,
+                   5.0);
+}
+
 TEST_F(TestParamsConsistency, UpdateMapGainsDofK) {
   const auto& dof = params_.dof_names[0];
   const std::string param_name = fmt::format("gains.{}.k", dof);

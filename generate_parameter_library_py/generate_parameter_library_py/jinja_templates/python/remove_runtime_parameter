@@ -9,24 +9,25 @@ for value_{{loop.index}} in _map_entry_names(updated_params{{base}}{% for outer 
         continue
 {%- endfilter -%}
 {% endfor %}
-{# add an entry for every key in the lists, level by level, so that a key gets one even when its child list is empty, then give the innermost the value on the node #}
+{# add an entry for every key in the lists, level by level, so that a key gets one even when its child list is empty. Only an entry that is not in the snapshot gets its value from the node: update() keeps existing entries current, and may already hold a value the node has not committed yet. #}
 {% for mapped_param in mapped_params -%}
 {%- set container = "updated_params" ~ base if loop.first else "entry_" ~ loop.index0 -%}
 {%- filter indent(width=4*loop.index0) %}
 for value_{{loop.index}} in updated_params.{{mapped_param}}:
-    if value_{{loop.index}} not in _map_entry_names({{container}}):
+    new_{{loop.index}} = {% if not loop.first %}new_{{loop.index0}} or {% endif %}value_{{loop.index}} not in _map_entry_names(current_params{{base}}{% for outer in parameter_map[:loop.index0] %}.get_entry(value_{{loop.index}}){% endfor %})
+    if new_{{loop.index}}:
         any_entry_changed = True
     entry_{{loop.index}} = {{container}}.add_entry(value_{{loop.index}})
 {%- endfilter -%}
 {% endfor %}
 {%- filter indent(width=4*(mapped_params|length)) %}
+if new_{{mapped_params|length}}:
+{%- filter indent(width=4) %}
 {% if struct_name != "" -%}
 param_name = f"{self.prefix_}{{struct_name}}{% for map in parameter_map%}.{value_{{loop.index}}}{% endfor %}.{{parameter_field}}"
 {% else -%}
 param_name = f"{self.prefix_}{% for map in parameter_map%}{value_{{loop.index}}}{% if not loop.last %}.{% endif %}{% endfor %}.{{parameter_field}}"
 {% endif -%}
-value = self.node_.get_parameter(param_name).{{parameter_as_function}}
-if entry_{{mapped_params|length}}.{{parameter_field}} != value:
-    entry_{{mapped_params|length}}.{{parameter_field}} = value
-    any_entry_changed = True
+entry_{{mapped_params|length}}.{{parameter_field}} = self.node_.get_parameter(param_name).{{parameter_as_function}}
+{% endfilter -%}
 {% endfilter -%}

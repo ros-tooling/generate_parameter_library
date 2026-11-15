@@ -115,8 +115,9 @@ self.stamp_ = Time()
 
             Declares the parameters of new keys, then brings the maps of the Params
             object in line with the key lists and with the values on the node: entries
-            of removed keys are removed, and entries of keys that were added again get
-            the values their parameters kept. The parameters of removed keys stay
+            of removed keys are removed, and entries of new keys or keys that were added
+            again get the values of their parameters on the node. Existing entries are
+            left alone, as update() keeps them current. The parameters of removed keys stay
             declared on the node, like in the C++ library where rclcpp cannot
             undeclare statically typed parameters.
             Do not call it from a parameter callback such as the user callback: there

@@ -96,20 +96,31 @@ def test_values_kept_on_the_node_are_restored(listener_and_node):
     assert (entry.p, entry.i) == (5.0, 8.0)
 
 
-def test_refresh_does_not_revert_an_update_made_meanwhile(listener_and_node):
+def run_once_when_the_sync_starts(listener, monkeypatch, action):
+    """Run action, as another thread would, between refresh's snapshot and store."""
+    entry_names = listener.module._map_entry_names
+    ran = []
+
+    def entry_names_after_action(struct):
+        # the declare step does not list entries, the sync starts with it
+        if not ran:
+            ran.append(True)
+            action()
+        return entry_names(struct)
+
+    monkeypatch.setattr(listener.module, '_map_entry_names', entry_names_after_action)
+
+
+def test_refresh_does_not_revert_an_update_made_meanwhile(
+    listener_and_node, monkeypatch
+):
     listener, node = listener_and_node
     node.set_parameters([Parameter('joints', value=['a'])])
-    get_parameter = node.get_parameter
-    reads = []
-
-    def get_parameter_while_another_thread_sets_rate(name):
-        reads.append(name)
-        # the second read of pid.a.p is the first one after refresh's snapshot
-        if reads.count('pid.a.p') == 2:
-            node.set_parameters([Parameter('pid.rate', value=3.0)])
-        return get_parameter(name)
-
-    node.get_parameter = get_parameter_while_another_thread_sets_rate
+    run_once_when_the_sync_starts(
+        listener,
+        monkeypatch,
+        lambda: node.set_parameters([Parameter('pid.rate', value=3.0)]),
+    )
     listener.refresh_dynamic_parameters()
 
     params = listener.get_params()
@@ -125,19 +136,15 @@ def test_refresh_without_changes_keeps_the_stamp(listener_and_node):
     assert not listener.is_old(before)
 
 
-def test_key_added_while_refreshing_is_declared_before_it_is_read(listener_and_node):
+def test_key_added_while_refreshing_is_declared_before_it_is_read(
+    listener_and_node, monkeypatch
+):
     listener, node = listener_and_node
-    get_parameter = node.get_parameter
-    reads = []
-
-    def get_parameter_while_another_thread_adds_a_key(name):
-        reads.append(name)
-        # the second read of pid.a.p is the first one of the sync
-        if reads.count('pid.a.p') == 2:
-            node.set_parameters([Parameter('joints', value=['a', 'b', 'c'])])
-        return get_parameter(name)
-
-    node.get_parameter = get_parameter_while_another_thread_adds_a_key
+    run_once_when_the_sync_starts(
+        listener,
+        monkeypatch,
+        lambda: node.set_parameters([Parameter('joints', value=['a', 'b', 'c'])]),
+    )
     listener.refresh_dynamic_parameters()
 
     assert node.has_parameter('pid.c.p')
@@ -165,3 +172,13 @@ def test_get_params_keeps_the_stamp_of_an_update_made_meanwhile(
 
     assert listener.is_old(before)
     assert listener.get_params().pid.rate == 3.0
+
+
+def test_refresh_keeps_a_value_the_node_has_not_committed_yet(listener_and_node):
+    """update() runs in the on-set callback, before the node stores the value."""
+    listener, node = listener_and_node
+    # what a setter on another thread has done when refresh runs in between
+    listener.update([Parameter('pid.a.p', value=5.0)])
+    listener.refresh_dynamic_parameters()
+
+    assert listener.get_params().pid.get_entry('a').p == 5.0
