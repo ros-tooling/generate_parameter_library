@@ -351,6 +351,12 @@ class CodeGenVariableBase:
         if isinstance(arg, list):
             if not arg:
                 return 'empty array'
+            # name every element type, so the offending element is visible
+            element_types = list(
+                dict.fromkeys(self.get_yaml_type_from_python(value) for value in arg)
+            )
+            if len(element_types) > 1:
+                return f'mixed array ({", ".join(element_types)})'
             return self.conversion.python_list_to_yaml_type[str(type(arg[0]))]
         else:
             return self.conversion.python_val_to_yaml_type[str(type(arg))]

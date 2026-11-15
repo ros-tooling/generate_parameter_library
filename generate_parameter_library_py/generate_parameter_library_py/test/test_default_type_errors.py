@@ -47,3 +47,28 @@ def test_wrong_default_type_is_a_syntax_error(
 
     with pytest.raises(YAMLSyntaxError, match='incorrect type'):
         GenerateCode(language).parse(str(definition), '')
+
+
+@pytest.mark.parametrize(
+    'defined_type,default_value,got',
+    [
+        ('int_array', '[1, true]', 'got: mixed array (int, bool)'),
+        ('double_array', '[1.0, true]', 'got: mixed array (double, bool)'),
+        ('int_array', '[1, 2.5]', 'got: mixed array (int, double)'),
+    ],
+)
+def test_mixed_array_default_names_its_element_types(
+    tmp_path, defined_type, default_value, got
+):
+    """Naming the array after its first element hid the offending one."""
+    definition = tmp_path / 'parameters.yaml'
+    definition.write_text(
+        'typed:\n'
+        '  value:\n'
+        f'    type: {defined_type}\n'
+        f'    default_value: {default_value}\n'
+    )
+
+    with pytest.raises(YAMLSyntaxError) as error:
+        GenerateCode('cpp').parse(str(definition), '')
+    assert got in str(error.value)
