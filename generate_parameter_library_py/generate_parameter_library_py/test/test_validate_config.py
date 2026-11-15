@@ -232,6 +232,29 @@ def test_array_element_type_is_checked(workspace, definition):
     assert 'element 1 of the array' in found[0].message
 
 
+@pytest.mark.parametrize(
+    'joints,index',
+    [
+        # rcl_yaml_param_parser loads this as ["a", "b"]
+        ('[["a", "b"]]', 0),
+        # loads as ["a"], dropping "x"
+        ('["x", ["a"]]', 1),
+    ],
+)
+def test_nested_sequence_is_named_as_such(workspace, definition, joints, index):
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n'
+        f'    joints: {joints}\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].message.startswith(
+        f'element {index} of the array is a nested sequence'
+    )
+
+
 def test_fixed_size_array_is_checked(workspace, definition):
     config = write(
         workspace,
