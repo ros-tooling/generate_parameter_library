@@ -250,6 +250,7 @@ cpp_namespace:
 ```
 
 A parameter is a YAML dictionary with the only required key being `type`.
+The file is read as plain YAML data: language-specific tags such as `!!python/object` are rejected.
 
 | Field                  | Description                                                                                                    |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------- |
