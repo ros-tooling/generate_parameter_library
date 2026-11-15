@@ -357,9 +357,12 @@ class CodeGenVariableBase:
             )
             if len(element_types) > 1:
                 return f'mixed array ({", ".join(element_types)})'
-            return self.conversion.python_list_to_yaml_type[str(type(arg[0]))]
-        else:
-            return self.conversion.python_val_to_yaml_type[str(type(arg))]
+            return self.conversion.python_list_to_yaml_type.get(
+                str(type(arg[0])), f'array of {element_types[0]}'
+            )
+        # values without a ROS type, such as null or a map, still get a name
+        fallback = {type(None): 'null', dict: 'map'}.get(type(arg), type(arg).__name__)
+        return self.conversion.python_val_to_yaml_type.get(str(type(arg)), fallback)
 
     def process_type(self, defined_type):
         raise NotImplemented()

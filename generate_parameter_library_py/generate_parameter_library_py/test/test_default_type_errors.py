@@ -31,6 +31,13 @@ from generate_parameter_library_py.parse_yaml import GenerateCode, YAMLSyntaxErr
         ('double', 'false'),
         ('int_array', '[1, true]'),
         ('double_array', '[true]'),
+        # Values without a ROS type used to crash while building the message.
+        ('string', '[1, null]'),
+        ('string', '[1, {}]'),
+        ('string', '[null]'),
+        ('string', '{}'),
+        ('int', '{a: 1}'),
+        ('string_array', '[[1]]'),
     ],
 )
 @pytest.mark.parametrize('language', ['cpp', 'python'])
@@ -55,6 +62,9 @@ def test_wrong_default_type_is_a_syntax_error(
         ('int_array', '[1, true]', 'got: mixed array (int, bool)'),
         ('double_array', '[1.0, true]', 'got: mixed array (double, bool)'),
         ('int_array', '[1, 2.5]', 'got: mixed array (int, double)'),
+        ('string', '[1, null]', 'got: mixed array (int, null)'),
+        ('string', '[{}]', 'got: array of map'),
+        ('string', '{}', 'got: map'),
     ],
 )
 def test_mixed_array_default_names_its_element_types(
