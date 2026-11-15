@@ -678,7 +678,8 @@ behave unexpectedly:
   reads as a bool
 * an empty sequence, which `rcl_yaml_param_parser` cannot give a type and reads
   as `PARAMETER_NOT_SET` rather than as an empty array
-* a sequence that mixes element types, such as `["a", 2]` or `[1, 2.5]`, which
+* a sequence that mixes element types, such as `["a", 2]` or `[1, 2.5]`, or
+  that holds two or more nested sequences, such as `[["a"], ["b"]]`, which
   makes `rcl_yaml_param_parser` reject the whole file; this is checked in each
   file before merging, because a later file cannot override a file that does
   not load
