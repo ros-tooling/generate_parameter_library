@@ -675,7 +675,10 @@ names it, and sections of other nodes in the same files are left out. This
 fits files shared by several nodes, such as a ros2_control configuration with
 several controllers, where the definition's root element is not the node name.
 A single definition is then used for the given node, and a node that no
-section applies to is an error, as the name is most likely misspelled. `--node` may be given more than once.
+section applies to is an error, as the name is most likely misspelled. With
+several definitions, only those of the given nodes are read, so a definition
+of another node in the same files cannot fail the check. `--node` may be given
+more than once.
 
 ```bash
 generate_parameter_library_validate \
