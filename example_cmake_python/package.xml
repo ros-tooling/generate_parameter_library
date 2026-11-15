@@ -18,6 +18,8 @@
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_index_python</test_depend>
+  <test_depend>generate_parameter_library_py</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
