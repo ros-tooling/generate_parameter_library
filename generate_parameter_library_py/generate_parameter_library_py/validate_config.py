@@ -851,8 +851,11 @@ def validate(
             raise ConfigError(f'--node {name}: give a node name, not a wildcard')
     diagnostics = []
     configs = [(path, read_config(path)) for path in config_paths]
-    used = {node_name_of(name) for _, sections in configs for name in sections}
-    used |= {node_name_of(name) for name in nodes or []}
+    if nodes:
+        # only the selected nodes are validated, so only their definitions are parsed
+        used = {node_name_of(name) for name in nodes}
+    else:
+        used = {node_name_of(name) for _, sections in configs for name in sections}
     definitions, unused, duplicates = load_definitions(definition_paths, used)
     single_definition = len(definition_paths) == 1
 
@@ -866,8 +869,9 @@ def validate(
             Diagnostic(
                 WARNING,
                 'parameter definitions',
-                f'{len(unused)} matched no configuration section and were not '
-                f'checked: {shown}',
+                f'{len(unused)} '
+                f'{"belong to no selected node" if nodes else "matched no configuration section"}'
+                f' and were not checked: {shown}',
             )
         )
 

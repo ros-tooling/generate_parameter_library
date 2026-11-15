@@ -507,6 +507,28 @@ def test_node_option_checks_only_that_node(workspace, definition):
     ]
 
 
+def test_node_option_does_not_parse_the_definitions_of_other_nodes(
+    workspace, definition
+):
+    """A broken definition of a node that is not selected must not fail the run."""
+    broken = write(
+        workspace,
+        'broken.yaml',
+        'other_node:\n  bad:\n    type: not_a_real_type\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n'
+        'other_node:\n  ros__parameters:\n    bad: 1\n',
+    )
+    diagnostics = validate([definition, broken], [config], nodes=['my_node'])
+    assert errors(diagnostics) == []
+    assert [d.severity for d in diagnostics] == ['WARNING']
+    assert 'broken.yaml' in diagnostics[0].message
+    assert 'no selected node' in diagnostics[0].message
+
+
 def test_node_option_checks_a_node_that_only_wildcards_apply_to(workspace, definition):
     """A launched node that no section names still gets the wildcard sections."""
     config = write(workspace, 'config.yaml', TWO_NODES)
