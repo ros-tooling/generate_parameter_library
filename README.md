@@ -687,10 +687,11 @@ parameters every node declares for itself, such as `use_sim_time`, and the
 subtree under a parameter of type `none`, are not reported.
 
 ```
-ERROR: my_node.background.r: Parameter 'my_node.background.r' with the value 300 must be within bounds [0, 255]
-ERROR: my_node.background.colour: unknown parameter (did you mean 'background.r'?)
-ERROR: my_node.pid.rate: expected type 'double', got 'string'
 WARNING: my_node.background.b: missing from config, will use default_value 0
+ERROR: my_node.background.r: Value 300 in parameter 'background.r' must be within bounds [0, 255]
+ERROR: my_node.pid.rate: expected type 'double', got 'string'
+ERROR: my_node.background.colour: unknown parameter (did you mean 'background.r'?)
+3 error(s) found
 ```
 
 The exit status is 1 when any error was reported and 0 otherwise, so the tool
