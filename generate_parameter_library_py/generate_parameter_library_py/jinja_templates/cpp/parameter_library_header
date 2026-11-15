@@ -176,27 +176,30 @@ struct StackParams {
      * keys are erased, and entries of keys that were added again get the values their
      * parameters kept. The parameters of removed keys stay declared on the node,
      * because rclcpp cannot undeclare statically typed parameters.
+     * Do not call it from a parameter callback such as the user callback: there the
+     * node has not stored the new values yet, and rclcpp rejects declaring parameters.
      */
     void refresh_dynamic_parameters() {
-      {
-        // declare the parameters of new keys; each declaration triggers update(),
-        // which stores the new entry
-        auto updated_params = get_params();
-        rclcpp::Parameter param;
-{%- filter indent(width=8) %}
-{{update_declare_dynamic_parameters}}
-{%- endfilter %}
-      }
-{%- if remove_dynamic_parameters|length %}
-      // sync the maps with the key lists and with the values on the node
+      // Each attempt declares and syncs for the same snapshot of the key lists,
+      // and is stored only if nothing was stored since. Declaring a parameter
+      // triggers update(), so an attempt that declared one is repeated.
       while (true) {
         const auto current_params = get_params();
+        {
+          // declare the parameters of new keys
+          auto updated_params = current_params;
+          rclcpp::Parameter param;
+{%- filter indent(width=10) %}
+{{update_declare_dynamic_parameters}}
+{%- endfilter %}
+        }
+{%- if remove_dynamic_parameters|length %}
+        // sync the maps with the key lists and with the values on the node
         auto updated_params = current_params;
         bool any_entry_changed = false;
 {%- filter indent(width=8) %}
 {{remove_dynamic_parameters}}
 {%- endfilter %}
-        // store only if update() stored nothing meanwhile, else sync again
         std::lock_guard<std::mutex> lock(update_mutex_);
         if (is_old(current_params)) {
           continue;
@@ -205,9 +208,9 @@ struct StackParams {
           updated_params.__stamp = clock_.now();
           update_internal_params(updated_params);
         }
+{%- endif %}
         return;
       }
-{%- endif %}
     }
 
     rcl_interfaces::msg::SetParametersResult update(const std::vector<rclcpp::Parameter> &parameters) {

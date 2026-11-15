@@ -592,6 +592,24 @@ TEST_F(TestParamsConsistency, RefreshErasesKeysWhoseChildMapIsEmpty) {
   EXPECT_EQ(updated_params.nested_dynamic.joints_map.count(removed), 0u);
 }
 
+TEST_F(TestParamsConsistency, RefreshAddsKeysWhoseChildMapIsEmpty) {
+  const auto all_joints = params_.joints;
+  const std::string joint = all_joints.back();
+  node_->set_parameters(
+      {rclcpp::Parameter("dof_names", std::vector<std::string>{})});
+  node_->set_parameters({rclcpp::Parameter(
+      "joints",
+      std::vector<std::string>(all_joints.begin(), all_joints.end() - 1))});
+  param_listener_->refresh_dynamic_parameters();
+  node_->set_parameters({rclcpp::Parameter("joints", all_joints)});
+  param_listener_->refresh_dynamic_parameters();
+
+  const auto updated_params = param_listener_->get_params();
+  EXPECT_EQ(updated_params.pid.joints_map.count(joint), 1u);
+  EXPECT_EQ(updated_params.joints_map.count(joint), 1u);
+  EXPECT_EQ(updated_params.nested_dynamic.joints_map.count(joint), 1u);
+}
+
 TEST_F(TestParamsConsistency, UpdateMapGainsDofK) {
   const auto& dof = params_.dof_names[0];
   const std::string param_name = fmt::format("gains.{}.k", dof);

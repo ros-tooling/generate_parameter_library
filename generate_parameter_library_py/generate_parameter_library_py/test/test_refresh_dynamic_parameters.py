@@ -61,7 +61,9 @@ def listener_and_node(tmp_path, request):
     rclpy.init()
     node = rclpy.create_node('ctrl')
     try:
-        yield module.ctrl.ParamListener(node), node
+        listener = module.ctrl.ParamListener(node)
+        listener.module = module
+        yield listener, node
     finally:
         node.destroy_node()
         rclpy.shutdown()
@@ -121,3 +123,45 @@ def test_refresh_without_changes_keeps_the_stamp(listener_and_node):
     before = listener.get_params()
     listener.refresh_dynamic_parameters()
     assert not listener.is_old(before)
+
+
+def test_key_added_while_refreshing_is_declared_before_it_is_read(listener_and_node):
+    listener, node = listener_and_node
+    get_parameter = node.get_parameter
+    reads = []
+
+    def get_parameter_while_another_thread_adds_a_key(name):
+        reads.append(name)
+        # the second read of pid.a.p is the first one of the sync
+        if reads.count('pid.a.p') == 2:
+            node.set_parameters([Parameter('joints', value=['a', 'b', 'c'])])
+        return get_parameter(name)
+
+    node.get_parameter = get_parameter_while_another_thread_adds_a_key
+    listener.refresh_dynamic_parameters()
+
+    assert node.has_parameter('pid.c.p')
+    assert listener.get_params().pid.get_entry('c').p == 1.0
+
+
+def test_get_params_keeps_the_stamp_of_an_update_made_meanwhile(
+    listener_and_node, monkeypatch
+):
+    listener, node = listener_and_node
+    before = listener.get_params()
+    copy_module = listener.module.copy
+    deepcopy = copy_module.deepcopy
+    updated = []
+
+    def deepcopy_while_another_thread_updates(*args, **kwargs):
+        if not updated:
+            updated.append(True)
+            node.set_parameters([Parameter('pid.rate', value=3.0)])
+        return deepcopy(*args, **kwargs)
+
+    monkeypatch.setattr(copy_module, 'deepcopy', deepcopy_while_another_thread_updates)
+    listener.get_params()
+    monkeypatch.undo()
+
+    assert listener.is_old(before)
+    assert listener.get_params().pid.rate == 3.0

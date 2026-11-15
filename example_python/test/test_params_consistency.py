@@ -574,6 +574,25 @@ class TestParamsConsistency(unittest.TestCase):
             with self.assertRaises(AttributeError):
                 struct.get_entry(removed)
 
+    def test_refresh_adds_keys_whose_child_map_is_empty(self):
+        all_joints = list(self.params.joints)
+        joint = all_joints[-1]
+        self.node.set_parameters(
+            [Parameter('dof_names', Parameter.Type.STRING_ARRAY, [])]
+        )
+        self.node.set_parameters([Parameter('joints', value=all_joints[:-1])])
+        self.listener.refresh_dynamic_parameters()
+        self.node.set_parameters([Parameter('joints', value=all_joints)])
+        self.listener.refresh_dynamic_parameters()
+
+        updated_params = self.listener.get_params()
+        for struct in (
+            updated_params.pid,
+            updated_params,
+            updated_params.nested_dynamic,
+        ):
+            struct.get_entry(joint)
+
     def test_update_map_gains_dof_k(self):
         dof = self.params.dof_names[0]
         param_name = f'gains.{dof}.k'

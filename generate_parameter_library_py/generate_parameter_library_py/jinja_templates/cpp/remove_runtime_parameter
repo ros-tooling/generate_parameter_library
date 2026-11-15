@@ -15,15 +15,16 @@ for (auto it_{{loop.index}} = {{level_map(loop.index)}}.begin(); it_{{loop.index
     ++it_{{parameter_map|length - loop.index0}};
 }
 {% endfor -%}
-{# add the entries of the keys in the lists, with the values on the node #}
+{# add an entry for every key in the lists, level by level, so that a key gets one even when its child list is empty, then give the innermost the value on the node #}
 {% for mapped_param in mapped_params -%}
+{%- set container = "updated_params." ~ base ~ parameter_map[0] if loop.first else "entry_" ~ loop.index0 ~ "." ~ parameter_map[loop.index0] -%}
 for (const auto & value_{{loop.index}} : updated_params.{{mapped_param}}) {
+    if ({{container}}.count(value_{{loop.index}}) == 0) {
+        any_entry_changed = true;
+    }
+    auto & entry_{{loop.index}} = {{container}}[value_{{loop.index}}];
 {% endfor -%}
 {%- filter indent(width=4) -%}
-if ({% for map in parameter_map %}{% if not loop.first %} || {% endif %}updated_params.{{base}}{% for outer in parameter_map[:loop.index0] %}{{outer}}.at(value_{{loop.index}}).{% endfor %}{{map}}.count(value_{{loop.index}}) == 0{% endfor %}) {
-    any_entry_changed = true;
-}
-auto& entry = updated_params.{{base}}{% for map in parameter_map %}{{map}}[value_{{loop.index}}]{% if not loop.last %}.{% endif %}{% endfor %};
 std::string value = fmt::format("{%- for mapped_param in mapped_params -%}{% if loop.index == 1 %}{}{% else %}.{}{% endif -%} {%- endfor -%}",
 {%- for mapped_param in mapped_params -%}{% if loop.index == 1 %} value_{{loop.index}}{% else %}, value_{{loop.index}}{% endif -%} {%- endfor %});
 {% if struct_name != "" -%}
@@ -32,8 +33,8 @@ auto param_name = fmt::format("{}{}.{}.{}", prefix_, "{{struct_name}}", value, "
 auto param_name = fmt::format("{}{}.{}", prefix_, value, "{{parameter_field}}");
 {% endif -%}
 const auto param = parameters_interface_->get_parameter(param_name);
-if (to_parameter_value(entry.{{parameter_field}}) != param.get_parameter_value()) {
-    entry.{{parameter_field}} = param.{{parameter_as_function}};
+if (to_parameter_value(entry_{{mapped_params|length}}.{{parameter_field}}) != param.get_parameter_value()) {
+    entry_{{mapped_params|length}}.{{parameter_field}} = param.{{parameter_as_function}};
     any_entry_changed = true;
 }
 {% endfilter -%}

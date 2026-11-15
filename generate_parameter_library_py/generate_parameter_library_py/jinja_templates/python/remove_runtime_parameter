@@ -9,25 +9,24 @@ for value_{{loop.index}} in _map_entry_names(updated_params{{base}}{% for outer 
         continue
 {%- endfilter -%}
 {% endfor %}
-{# add the entries of the keys in the lists, with the values on the node #}
+{# add an entry for every key in the lists, level by level, so that a key gets one even when its child list is empty, then give the innermost the value on the node #}
 {% for mapped_param in mapped_params -%}
+{%- set container = "updated_params" ~ base if loop.first else "entry_" ~ loop.index0 -%}
 {%- filter indent(width=4*loop.index0) %}
 for value_{{loop.index}} in updated_params.{{mapped_param}}:
+    if value_{{loop.index}} not in _map_entry_names({{container}}):
+        any_entry_changed = True
+    entry_{{loop.index}} = {{container}}.add_entry(value_{{loop.index}})
 {%- endfilter -%}
-{% endfor -%}
+{% endfor %}
 {%- filter indent(width=4*(mapped_params|length)) %}
-{% for map in parameter_map -%}
-{% if not loop.first %}el{% endif %}if value_{{loop.index}} not in _map_entry_names(updated_params{{base}}{% for outer in parameter_map[:loop.index0] %}.get_entry(value_{{loop.index}}){% endfor %}):
-    any_entry_changed = True
-{% endfor -%}
-entry = updated_params{{base}}{% for map in parameter_map %}.add_entry(value_{{loop.index}}){% endfor %}
 {% if struct_name != "" -%}
 param_name = f"{self.prefix_}{{struct_name}}{% for map in parameter_map%}.{value_{{loop.index}}}{% endfor %}.{{parameter_field}}"
 {% else -%}
 param_name = f"{self.prefix_}{% for map in parameter_map%}{value_{{loop.index}}}{% if not loop.last %}.{% endif %}{% endfor %}.{{parameter_field}}"
 {% endif -%}
 value = self.node_.get_parameter(param_name).{{parameter_as_function}}
-if entry.{{parameter_field}} != value:
-    entry.{{parameter_field}} = value
+if entry_{{mapped_params|length}}.{{parameter_field}} != value:
+    entry_{{mapped_params|length}}.{{parameter_field}} = value
     any_entry_changed = True
 {% endfilter -%}

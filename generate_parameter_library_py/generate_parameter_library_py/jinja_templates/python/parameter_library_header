@@ -69,12 +69,11 @@ self.stamp_ = Time()
             self.clock_ = Clock()
 
         def get_params(self):
-            tmp = self.params_.stamp_
-            self.params_.stamp_ = None
-            paramCopy = copy.deepcopy(self.params_)
-            paramCopy.stamp_ = tmp
-            self.params_.stamp_ = tmp
-            return paramCopy
+            # Read params_ once and leave it untouched, so that an update() in
+            # another thread can neither be copied halfway nor get an old stamp.
+            # The memo keeps the stamp itself instead of copying it.
+            params = self.params_
+            return copy.deepcopy(params, {id(params.stamp_): params.stamp_})
 
         def is_old(self, other_param):
             return self.params_.stamp_ != other_param.stamp_
@@ -118,33 +117,40 @@ self.stamp_ = Time()
             object in line with the key lists and with the values on the node: entries
             of removed keys are removed, and entries of keys that were added again get
             the values their parameters kept. The parameters of removed keys stay
-            declared on the node, like in the C++ library where rclpy cannot
+            declared on the node, like in the C++ library where rclcpp cannot
             undeclare statically typed parameters.
+            Do not call it from a parameter callback such as the user callback: there
+            the node has not stored the new values yet.
             """
-            # declare the parameters of new keys; each declaration triggers update(),
-            # which stores the new entry
-            updated_params = self.get_params()
-{%- filter indent(width=12) %}
+            # Each attempt declares and syncs for the same snapshot of the key lists,
+            # and is stored only if nothing was stored since. Declaring a parameter
+            # triggers update(), so an attempt that declared one is repeated.
+            while True:
+                current_params = self.get_params()
+                # declare the parameters of new keys, on a copy of the snapshot
+                updated_params = copy.deepcopy(
+                    current_params, {id(current_params.stamp_): current_params.stamp_}
+                )
+{%- filter indent(width=16) %}
 {{update_declare_dynamic_parameters}}
 {%- endfilter %}
 {%- if remove_dynamic_parameters|length %}
-            # sync the maps with the key lists and with the values on the node
-            while True:
-                current_params = self.get_params()
-                updated_params = self.get_params()
+                # sync the maps with the key lists and with the values on the node
+                updated_params = copy.deepcopy(
+                    current_params, {id(current_params.stamp_): current_params.stamp_}
+                )
                 any_entry_changed = False
 {%- filter indent(width=16) %}
 {{remove_dynamic_parameters}}
 {%- endfilter %}
-                # store only if update() stored nothing meanwhile, else sync again
                 with self.update_lock_:
                     if self.is_old(current_params):
                         continue
                     if any_entry_changed:
                         updated_params.stamp_ = self.clock_.now()
                         self.update_internal_params(updated_params)
-                return
 {%- endif %}
+                return
 
         def update(self, parameters):
             with self.update_lock_:
