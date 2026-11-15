@@ -844,8 +844,11 @@ def validate(
     its own. With `nodes`, only these nodes are validated, with the values of
     every section that applies to them, and a single definition is used for
     them even if other sections match it by name. A given node that no section
-    applies to is an error, as it is most likely a misspelled name.
+    applies to is an error, as it is most likely a misspelled name. An empty
+    `nodes` list is treated like None, so every node is validated.
     """
+    # every check below treats an empty selection like no selection
+    nodes = nodes or None
     for name in nodes or []:
         if '*' in name:
             raise ConfigError(f'--node {name}: give a node name, not a wildcard')

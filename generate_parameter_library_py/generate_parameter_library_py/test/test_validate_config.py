@@ -561,6 +561,16 @@ def test_node_option_matches_namespaces(workspace, definition):
     assert 'no configuration section applies' in errors(diagnostics)[0].message
 
 
+def test_empty_node_list_selects_like_no_node_list(workspace, definition):
+    """nodes=[] must not silently skip every named section."""
+    config = write(
+        workspace, 'config.yaml', 'my_node:\n  ros__parameters:\n    rate: -1.0\n'
+    )
+    expected = messages(validate([definition], [config]))
+    assert expected != []
+    assert messages(validate([definition], [config], nodes=[])) == expected
+
+
 def test_node_option_rejects_wildcards(workspace, definition):
     config = write(workspace, 'config.yaml', TWO_NODES)
     code = main(['--param-definition', definition, '--config', config, '--node', '/**'])
