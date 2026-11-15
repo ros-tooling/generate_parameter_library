@@ -777,7 +777,8 @@ def validate(
         node_name = node_name_of(section_name)
         if node_name in definitions:
             generator = definitions[node_name]
-        elif single_definition and not matched:
+        # a plain file names no node, so a match in another file says nothing about it
+        elif single_definition and (section_name == '' or not matched):
             generator = next(iter(definitions.values()))
         else:
             diagnostics.append(

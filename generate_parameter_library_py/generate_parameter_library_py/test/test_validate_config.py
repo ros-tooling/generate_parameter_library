@@ -426,6 +426,29 @@ def test_wildcard_only_config_is_validated(workspace, definition):
     assert 'rate' in found[0].location
 
 
+def test_plain_parameter_tree_is_checked_next_to_a_named_config(workspace, definition):
+    """A named config for the node must not stop the plain file from being checked."""
+    plain = write(
+        workspace,
+        'plain.yaml',
+        """rate: -1.0
+mandatory_gain: 1.5
+""",
+    )
+    named = write(
+        workspace,
+        'named.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 20.0
+    mandatory_gain: 1.5
+""",
+    )
+    for configs in ([plain, named], [named, plain]):
+        found = errors(validate([definition], configs))
+        assert [d.location for d in found] == ['rate'], configs
+
+
 def test_config_files_are_merged_in_order(workspace, definition):
     """Several files are stacked like the parameter files of one node."""
     common = write(
