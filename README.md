@@ -447,13 +447,27 @@ params.gain.get_entry("joint1").get_entry("position").value
 
 When a key array such as `joints` changes at runtime, call `refresh_dynamic_parameters()` on the `ParamListener` to update the maps:
 
+**C++**
+
 ```c++
 param_listener->refresh_dynamic_parameters();
+for (const auto & [joint, gains] : param_listener->get_params().pid.joints_map) {
+  // only the joints currently in `joints`
+}
+```
+
+**Python**
+
+```python
+param_listener.refresh_dynamic_parameters()
+params = param_listener.get_params()
+for joint in params.pid.entry_names():
+    gains = params.pid.get_entry(joint)  # only the joints currently in `joints`
 ```
 
 - Keys that were added get their parameters declared, and their entries are added to the maps.
 - Keys that were removed are erased from the maps.
-  Their parameters stay declared on the node, because rclcpp cannot undeclare statically typed parameters.
+  Their parameters stay declared on the node, because rclcpp cannot undeclare statically typed parameters; the Python library behaves the same.
   If a key is added again, its entry is restored with the current parameter values.
 
 #### Key array scope resolution
