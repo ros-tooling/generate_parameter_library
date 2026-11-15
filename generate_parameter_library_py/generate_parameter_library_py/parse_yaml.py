@@ -756,14 +756,14 @@ class DeclareRuntimeParameter(DeclareParameterBase):
 
 class RemoveRuntimeParameter:
     """
-    Code that erases the struct entry of a key removed from its key list.
+    Code that syncs the struct entries of one mapped parameter with its key lists.
 
-    Rendered into ``refresh_dynamic_parameters``. Every key in the struct maps
-    that is no longer in the corresponding key list is erased from the struct.
-    It also detects list keys without a struct entry, so that refresh stores
-    entries whose parameters were already declared, e.g. a key added back.
-    The parameter stays declared on the node: rclcpp cannot undeclare statically
-    typed parameters, and both languages behave the same.
+    Rendered into ``refresh_dynamic_parameters``. Keys that are no longer in
+    their key list are erased level by level, so that a key without children
+    goes too. Keys in the lists get an entry with the value on the node, which
+    restores a key that was added again. Every change sets ``any_entry_changed``.
+    The parameters of erased keys stay declared on the node: rclcpp cannot
+    undeclare statically typed parameters, and both languages behave the same.
     """
 
     @typechecked
@@ -788,6 +788,7 @@ class RemoveRuntimeParameter:
             'mapped_params': mapped_params,
             'struct_name': struct_name,
             'parameter_field': parameter_field,
+            'parameter_as_function': self.dynamic_declare_parameter.code_gen_variable.parameter_as_function_str(),
         }
 
         j2_template = Template(GenerateCode.templates['remove_runtime_parameter'])

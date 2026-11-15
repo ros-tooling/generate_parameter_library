@@ -1,26 +1,39 @@
 {%- set base = struct_name ~ "." if struct_name != "" else "" -%}
+{%- macro level_map(index) -%}
+{% if index == 1 %}updated_params.{{base}}{% else %}it_{{index - 1}}->second.{% endif %}{{parameter_map[index - 1]}}
+{%- endmacro -%}
+{# erase the keys that left their list, level by level, so that a key goes even without children #}
 {% for map in parameter_map -%}
-for (const auto & [value_{{loop.index}}, entry_{{loop.index}}] : {% if loop.first %}current_params.{{base}}{% else %}entry_{{loop.index0}}.{% endif %}{{map}}) {
-{% endfor -%}
-{%- filter indent(width=4) -%}
-{% for mapped_param in mapped_params -%}
-const bool keep_{{loop.index}} = std::find(updated_params.{{mapped_param}}.begin(), updated_params.{{mapped_param}}.end(), value_{{loop.index}}) != updated_params.{{mapped_param}}.end();
+for (auto it_{{loop.index}} = {{level_map(loop.index)}}.begin(); it_{{loop.index}} != {{level_map(loop.index)}}.end();) {
+    if (std::find(updated_params.{{mapped_params[loop.index0]}}.begin(), updated_params.{{mapped_params[loop.index0]}}.end(), it_{{loop.index}}->first) == updated_params.{{mapped_params[loop.index0]}}.end()) {
+        it_{{loop.index}} = {{level_map(loop.index)}}.erase(it_{{loop.index}});
+        any_entry_changed = true;
+        continue;
+    }
 {% endfor -%}
 {% for map in parameter_map -%}
-{% if not loop.first %}else {% endif %}if (!keep_{{loop.index}}) {
-    updated_params.{{base}}{% for outer in parameter_map[:loop.index0] %}{{outer}}.at(value_{{loop.index}}).{% endfor %}{{map}}.erase(value_{{loop.index}});
-    any_entry_changed = true;
+    ++it_{{parameter_map|length - loop.index0}};
 }
 {% endfor -%}
-{% endfilter -%}
-{%- for map in parameter_map -%}
-}
-{% endfor -%}
+{# add the entries of the keys in the lists, with the values on the node #}
 {% for mapped_param in mapped_params -%}
 for (const auto & value_{{loop.index}} : updated_params.{{mapped_param}}) {
 {% endfor -%}
 {%- filter indent(width=4) -%}
-if ({% for map in parameter_map %}{% if not loop.first %} || {% endif %}current_params.{{base}}{% for outer in parameter_map[:loop.index0] %}{{outer}}.at(value_{{loop.index}}).{% endfor %}{{map}}.count(value_{{loop.index}}) == 0{% endfor %}) {
+if ({% for map in parameter_map %}{% if not loop.first %} || {% endif %}updated_params.{{base}}{% for outer in parameter_map[:loop.index0] %}{{outer}}.at(value_{{loop.index}}).{% endfor %}{{map}}.count(value_{{loop.index}}) == 0{% endfor %}) {
+    any_entry_changed = true;
+}
+auto& entry = updated_params.{{base}}{% for map in parameter_map %}{{map}}[value_{{loop.index}}]{% if not loop.last %}.{% endif %}{% endfor %};
+std::string value = fmt::format("{%- for mapped_param in mapped_params -%}{% if loop.index == 1 %}{}{% else %}.{}{% endif -%} {%- endfor -%}",
+{%- for mapped_param in mapped_params -%}{% if loop.index == 1 %} value_{{loop.index}}{% else %}, value_{{loop.index}}{% endif -%} {%- endfor %});
+{% if struct_name != "" -%}
+auto param_name = fmt::format("{}{}.{}.{}", prefix_, "{{struct_name}}", value, "{{parameter_field}}");
+{% else -%}
+auto param_name = fmt::format("{}{}.{}", prefix_, value, "{{parameter_field}}");
+{% endif -%}
+const auto param = parameters_interface_->get_parameter(param_name);
+if (to_parameter_value(entry.{{parameter_field}}) != param.get_parameter_value()) {
+    entry.{{parameter_field}} = param.{{parameter_as_function}};
     any_entry_changed = true;
 }
 {% endfilter -%}

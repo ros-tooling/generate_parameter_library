@@ -557,6 +557,41 @@ TEST_F(TestParamsConsistency, RefreshRestoresMappedEntriesAddedAgain) {
   EXPECT_DOUBLE_EQ(updated_params.pid.joints_map.at(added_again).p, new_value);
 }
 
+TEST_F(TestParamsConsistency, RefreshRestoresValuesOfTheOnlyMapOfAKeyList) {
+  // nested_map.entries keys no other map, so no other entry signals the change
+  node_->set_parameters({rclcpp::Parameter("nested_map.entry1.weight", 8.0)});
+  node_->set_parameters({rclcpp::Parameter(
+      "nested_map.entries", std::vector<std::string>{"entry2"})});
+  param_listener_->refresh_dynamic_parameters();
+
+  // setting value recreates the entry in update(), with the default weight
+  node_->set_parameters({rclcpp::Parameter(
+      "nested_map.entries", std::vector<std::string>{"entry1", "entry2"})});
+  node_->set_parameters({rclcpp::Parameter("nested_map.entry1.value", 5.0)});
+  param_listener_->refresh_dynamic_parameters();
+
+  const auto entry =
+      param_listener_->get_params().nested_map.entries_map.at("entry1");
+  EXPECT_DOUBLE_EQ(entry.value, 5.0);
+  EXPECT_DOUBLE_EQ(entry.weight, 8.0);
+}
+
+TEST_F(TestParamsConsistency, RefreshErasesKeysWhoseChildMapIsEmpty) {
+  const std::string removed = params_.joints.back();
+  const std::vector<std::string> joints(params_.joints.begin(),
+                                        params_.joints.end() - 1);
+  node_->set_parameters(
+      {rclcpp::Parameter("dof_names", std::vector<std::string>{})});
+  param_listener_->refresh_dynamic_parameters();
+  node_->set_parameters({rclcpp::Parameter("joints", joints)});
+  param_listener_->refresh_dynamic_parameters();
+
+  const auto updated_params = param_listener_->get_params();
+  EXPECT_EQ(updated_params.pid.joints_map.count(removed), 0u);
+  EXPECT_EQ(updated_params.joints_map.count(removed), 0u);
+  EXPECT_EQ(updated_params.nested_dynamic.joints_map.count(removed), 0u);
+}
+
 TEST_F(TestParamsConsistency, UpdateMapGainsDofK) {
   const auto& dof = params_.dof_names[0];
   const std::string param_name = fmt::format("gains.{}.k", dof);

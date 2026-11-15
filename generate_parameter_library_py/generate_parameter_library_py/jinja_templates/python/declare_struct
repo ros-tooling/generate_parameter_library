@@ -23,9 +23,4 @@ def add_entry(self, name):
     return getattr(self, name)
 def get_entry(self, name):
     return getattr(self, name)
-def entry_names(self):
-    return [name for name, value in vars(self).items() if isinstance(value, self.__map_type)]
-def remove_entry(self, name):
-    if hasattr(self, name):
-        delattr(self, name)
 {% endif -%}
