@@ -466,7 +466,8 @@ for joint in params.joints:
     gains = params.pid.get_entry(joint)  # an entry exists for every joint in `joints`
 ```
 
-- Keys that were added get their parameters declared, and their entries are added to the maps.
+- Keys that were added get their parameters declared, and their entries are added to the maps with the values on the node.
+  Until then, a key that is in its key array but has no entry yet is not in the maps, and setting one of its parameters only reaches the node.
 - Keys that were removed are erased from the maps.
   Their parameters stay declared on the node, because rclcpp cannot undeclare statically typed parameters; the Python library behaves the same.
   If a key is added again, its entry is restored with the current parameter values.
