@@ -478,6 +478,66 @@ def test_develop_links_definition_to_source(tmp_path, monkeypatch):
     )
 
 
+def definitions(prefix):
+    path = os.path.join(prefix, 'share', 'probe', 'parameter_definitions')
+    return {name: read(os.path.join(path, name)) for name in sorted(os.listdir(path))}
+
+
+def test_install_multiple_modules_installs_every_definition(tmp_path):
+    root = write_multi_module_package(str(tmp_path / 'src'))
+    prefix = install(root, str(tmp_path))
+
+    assert definitions(prefix) == {
+        'extra_parameters.yaml': PARAMETERS_YAML.replace('probe', 'extra'),
+        'probe_parameters.yaml': PARAMETERS_YAML,
+    }
+
+
+def test_install_qualifies_module_names_shared_by_packages(tmp_path):
+    # the same module name in two packages must not install one definition only
+    root = write_multi_module_package(str(tmp_path / 'src'))
+    setup_py = os.path.join(root, 'setup.py')
+    content = read(setup_py).replace("'extra_parameters'", "'probe_parameters'")
+    with open(setup_py, 'w') as f:
+        f.write(content)
+    prefix = install(root, str(tmp_path))
+
+    assert definitions(prefix) == {
+        'probe.probe_parameters.yaml': PARAMETERS_YAML,
+        'probe_extra.probe_parameters.yaml': PARAMETERS_YAML.replace('probe', 'extra'),
+    }
+
+
+def test_develop_copies_definition_without_symlinks(tmp_path, monkeypatch):
+    # e.g. Windows without the symlink privilege
+    site = tmp_path / 'site'
+    site.mkdir()
+    (site / 'sitecustomize.py').write_text(
+        'import os\n\n\n'
+        'def symlink(*args, **kwargs):\n'
+        "    raise OSError('symbolic links are not available')\n\n\n"
+        'os.symlink = symlink\n'
+    )
+    monkeypatch.setenv(
+        'PYTHONPATH',
+        os.pathsep.join([str(site)] + [p for p in [os.environ.get('PYTHONPATH')] if p]),
+    )
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    prefix = str(tmp_path / 'install')
+    run_setup(
+        root,
+        'develop',
+        '--prefix',
+        prefix,
+        '--no-deps',
+        'install_data',
+        '--install-dir',
+        prefix,
+    )
+
+    assert read(installed_definition(prefix)) == PARAMETERS_YAML
+
+
 LEGACY_SETUP_PY = """import sys
 
 from setuptools import setup

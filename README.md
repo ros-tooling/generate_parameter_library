@@ -714,7 +714,8 @@ Packages install each definition as
 be checked against a package installed from binaries or in an underlay, without
 its source. `<name>` is the library name given to `generate_parameter_library()`
 or `generate_parameter_module()` in CMake, or the module name given to
-`parameter_cmdclass()` or `generate_parameter_module()` in `setup.py`:
+`parameter_cmdclass()` or `generate_parameter_module()` in `setup.py`
+(`<package>.<module>` if modules in several Python packages share the name):
 
 ```bash
 generate_parameter_library_validate \

@@ -115,10 +115,13 @@ def _install_definitions(command, specs, link):
 
     Like generate_parameter_library() in CMake, so that tools such as
     generate_parameter_library_validate find it for binary and underlay
-    installs. data_files cannot rename, so each definition is placed under its
+    installs. A module name that several modules share, in different Python
+    packages, is qualified as <package>.<module>.yaml, so no definition replaces
+    another. data_files cannot rename, so each definition is placed under its
     installed name in the build tree first: a link to the real source for
     editable installs, which colcon --symlink-install installs as a link, else
-    a copy of it.
+    or where links are not available (e.g. Windows without the symlink
+    privilege) a copy of it.
     """
     source_dir = _source_dir(command.distribution)
     stage = os.path.abspath(
@@ -128,17 +131,25 @@ def _install_definitions(command, specs, link):
         )
     )
     os.makedirs(stage, exist_ok=True)
+    module_names = [module_name for module_name, _, _, _ in specs]
     staged = []
-    for module_name, yaml_file, _, _ in specs:
+    for module_name, yaml_file, _, package in specs:
+        name = module_name
+        if module_names.count(module_name) > 1:
+            package = _resolve_package(command.distribution, package, yaml_file)
+            name = f'{package}.{module_name}'
         source = os.path.realpath(os.path.join(source_dir, yaml_file))
-        target = os.path.join(stage, module_name + '.yaml')
+        target = os.path.join(stage, name + '.yaml')
         if os.path.lexists(target):
             os.remove(target)
-        if link:
-            os.symlink(source, target)
-        else:
-            shutil.copyfile(source, target)
         staged.append(target)
+        if link:
+            try:
+                os.symlink(source, target)
+                continue
+            except OSError:
+                pass  # no symlinks available, copy instead
+        shutil.copyfile(source, target)
     entry = (
         os.path.join('share', command.distribution.get_name(), 'parameter_definitions'),
         staged,
