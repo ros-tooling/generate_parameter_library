@@ -461,8 +461,8 @@ for (const auto & [joint, gains] : param_listener->get_params().pid.joints_map) 
 ```python
 param_listener.refresh_dynamic_parameters()
 params = param_listener.get_params()
-for joint in params.pid.entry_names():
-    gains = params.pid.get_entry(joint)  # only the joints currently in `joints`
+for joint in params.joints:
+    gains = params.pid.get_entry(joint)  # an entry exists for every joint in `joints`
 ```
 
 - Keys that were added get their parameters declared, and their entries are added to the maps.
