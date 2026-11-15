@@ -529,6 +529,82 @@ def test_node_option_does_not_parse_the_definitions_of_other_nodes(
     assert 'no selected node' in diagnostics[0].message
 
 
+PART_A = """part_a:
+  gain:
+    type: double
+"""
+
+PART_B = """part_b:
+  rate:
+    type: int
+    validation:
+      gt<>: [0]
+"""
+
+COMBINED = """my_node:
+  ros__parameters:
+    gain: 1.5
+    rate: 10
+"""
+
+
+def test_node_option_applies_all_definitions_of_the_node(workspace):
+    """A node that uses several parameter libraries is checked against all of them."""
+    part_a = write(workspace, 'part_a.yaml', PART_A)
+    part_b = write(workspace, 'part_b.yaml', PART_B)
+    config = write(workspace, 'config.yaml', COMBINED)
+    # no definition is named after my_node, so without --node none is applied
+    assert errors(validate([part_a, part_b], [config])) == []
+    assert validate([part_a, part_b], [config], nodes=['my_node']) == []
+    broken = write(workspace, 'broken.yaml', COMBINED.replace('10', '0'))
+    found = errors(validate([part_a, part_b], [broken], nodes=['my_node']))
+    assert [d.location for d in found] == ['my_node.rate']
+
+
+def test_node_option_strict_knows_the_parameters_of_all_definitions(workspace):
+    part_a = write(workspace, 'part_a.yaml', PART_A)
+    part_b = write(workspace, 'part_b.yaml', PART_B)
+    config = write(workspace, 'config.yaml', COMBINED)
+    # with one definition, the parameters of the other are unknown
+    found = errors(validate([part_a], [config], strict=True, nodes=['my_node']))
+    assert [d.location for d in found] == ['my_node.rate']
+    assert (
+        errors(validate([part_a, part_b], [config], strict=True, nodes=['my_node']))
+        == []
+    )
+    typo = write(workspace, 'typo.yaml', COMBINED + '    gian: 1.0\n')
+    found = errors(validate([part_a, part_b], [typo], strict=True, nodes=['my_node']))
+    assert [d.location for d in found] == ['my_node.gian']
+
+
+def test_node_option_leaves_a_definition_to_the_node_it_names(workspace):
+    part_a = write(workspace, 'part_a.yaml', PART_A)
+    other = write(
+        workspace, 'other.yaml', 'other_node:\n  mandatory:\n    type: double\n'
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        COMBINED + 'other_node:\n  ros__parameters:\n    gain: "high"\n',
+    )
+    # part_a names no node, so it applies to both; other.yaml only to other_node
+    found = errors(validate([part_a, other], [config], nodes=['my_node', 'other_node']))
+    assert sorted(d.location for d in found) == [
+        'other_node.gain',
+        'other_node.mandatory',
+    ]
+
+
+def test_node_option_checks_a_parameter_of_two_definitions_once(workspace):
+    """The node keeps the first declaration, the later library skips it."""
+    part_a = write(workspace, 'part_a.yaml', PART_A)
+    as_int = write(workspace, 'as_int.yaml', 'part_c:\n  gain:\n    type: int\n')
+    config = write(workspace, 'config.yaml', COMBINED)
+    assert errors(validate([part_a, as_int], [config], nodes=['my_node'])) == []
+    found = errors(validate([as_int, part_a], [config], nodes=['my_node']))
+    assert [d.location for d in found] == ['my_node.gain']
+
+
 def test_node_option_checks_a_node_that_only_wildcards_apply_to(workspace, definition):
     """A launched node that no section names still gets the wildcard sections."""
     config = write(workspace, 'config.yaml', TWO_NODES)

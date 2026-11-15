@@ -472,6 +472,41 @@ def load_definitions(
     return generators, unused, duplicates
 
 
+def load_node_definitions(
+    paths: List[str],
+    configs: List[Tuple[str, Dict[str, Dict[str, Any]]]],
+    selected: Set[str],
+) -> Tuple[List[Tuple[str, Any]], List[str]]:
+    """Parse the definitions that apply to the selected nodes.
+
+    A definition whose root element names a node, selected or with a section in
+    the configs, belongs to that node; any other definition, such as the one of
+    a parameter library that a node uses next to others, applies to every
+    selected node. The definitions of nodes that are not selected are left out,
+    so a broken one does not fail the run, unless it is the only definition,
+    which is used for every node. Returns the parsed (namespace, definition)
+    pairs in the given order and the paths that were left out.
+    """
+    if len(paths) == 1:
+        generator = read_definition(paths[0])
+        return [(generator.namespace, generator)], []
+    named = {
+        node_name_of(name)
+        for _, sections in configs
+        for name in sections
+        if name and not is_wildcard_node(name)
+    }
+    definitions = []
+    unused = []
+    for path in paths:
+        namespace = definition_namespace(path)
+        if namespace in named and namespace not in selected:
+            unused.append(path)
+        else:
+            definitions.append((namespace, read_definition(path)))
+    return definitions, unused
+
+
 def declared_parameters(
     generator, values: Dict[str, Any]
 ) -> Tuple[Dict[str, DeclaredParameter], List[str]]:
@@ -632,13 +667,24 @@ def is_exempt(name: str, free_form: List[str]) -> bool:
 
 def validate_section(
     location: str,
-    generator,
+    generators: List[Any],
     values: Dict[str, Any],
     strict: bool,
 ) -> List[Diagnostic]:
-    """Validate one node's parameters against one definition."""
+    """Validate one node's parameters against the definitions it uses.
+
+    A parameter that several definitions declare is checked against the first,
+    as the node keeps the first declaration and the later libraries skip it. In
+    strict mode a parameter is unknown if none of the definitions declares it.
+    """
     diagnostics = []
-    parameters, free_form = declared_parameters(generator, values)
+    parameters: Dict[str, DeclaredParameter] = {}
+    free_form: List[str] = []
+    for generator in generators:
+        declared, free = declared_parameters(generator, values)
+        for name, parameter in declared.items():
+            parameters.setdefault(name, parameter)
+        free_form += free
 
     for name, parameter in sorted(parameters.items()):
         where = join_name(location, name)
@@ -842,7 +888,9 @@ def validate(
     node are by rclcpp, so a later file overrides an earlier one. A file
     without any `ros__parameters` key holds no node name and is validated on
     its own. With `nodes`, only these nodes are validated, with the values of
-    every section that applies to them, and a single definition is used for
+    every section that applies to them, against the definition named after
+    them and every definition that names no node, together; a definition named
+    after another node is left to that one. A single definition is used for
     them even if other sections match it by name. A given node that no section
     applies to is an error, as it is most likely a misspelled name. An empty
     `nodes` list is treated like None, so every node is validated.
@@ -854,13 +902,16 @@ def validate(
             raise ConfigError(f'--node {name}: give a node name, not a wildcard')
     diagnostics = []
     configs = [(path, read_config(path)) for path in config_paths]
+    single_definition = len(definition_paths) == 1
     if nodes:
-        # only the selected nodes are validated, so only their definitions are parsed
-        used = {node_name_of(name) for name in nodes}
+        selected = {node_name_of(name) for name in nodes}
+        node_definitions, unused = load_node_definitions(
+            definition_paths, configs, selected
+        )
+        duplicates = []
     else:
         used = {node_name_of(name) for _, sections in configs for name in sections}
-    definitions, unused, duplicates = load_definitions(definition_paths, used)
-    single_definition = len(definition_paths) == 1
+        definitions, unused, duplicates = load_definitions(definition_paths, used)
 
     for message in duplicates:
         diagnostics.append(Diagnostic(ERROR, 'parameter definitions', message))
@@ -886,7 +937,9 @@ def validate(
         for name, tree in sections.items()
     ]
     targets = plain + effective_sections(named, nodes)
-    matched = any(node_name_of(name) in definitions for _, name, _ in targets)
+    matched = not nodes and any(
+        node_name_of(name) in definitions for _, name, _ in targets
+    )
     for config_path, section_name, values in targets:
         if nodes and not config_path:
             diagnostics.append(
@@ -898,21 +951,38 @@ def validate(
                 )
             )
         node_name = node_name_of(section_name)
-        if node_name in definitions:
-            generator = definitions[node_name]
+        if nodes and single_definition:
+            generators = [generator for _, generator in node_definitions]
+        elif nodes:
+            # the definitions named after the node and those naming no selected
+            # node; a plain file names no node, so none applies to it
+            generators = [
+                generator
+                for namespace, generator in node_definitions
+                if section_name
+                and (namespace == node_name or namespace not in selected)
+            ]
+        elif node_name in definitions:
+            generators = [definitions[node_name]]
         # a plain file names no node, so a match in another file says nothing about it
-        elif single_definition and (nodes or section_name == '' or not matched):
-            generator = next(iter(definitions.values()))
+        elif single_definition and (section_name == '' or not matched):
+            generators = [next(iter(definitions.values()))]
         else:
+            generators = []
+        if not generators:
             diagnostics.append(
                 Diagnostic(
                     WARNING,
                     f'{config_path}:{section_name}',
-                    'no parameter definition has this namespace, not checked',
+                    (
+                        'no parameter definition applies to this node, not checked'
+                        if nodes
+                        else 'no parameter definition has this namespace, not checked'
+                    ),
                 )
             )
             continue
-        diagnostics.extend(validate_section(section_name, generator, values, strict))
+        diagnostics.extend(validate_section(section_name, generators, values, strict))
     return diagnostics
 
 
@@ -945,8 +1015,9 @@ def parse_args(argv=None):
         metavar='NAME',
         help='validate only this node, as `my_node` or `/ns/my_node`, with '
         'the values of every section that applies to it, including wildcard '
-        'sections; may be given more than once. Without it, every node a '
-        'section names is validated',
+        'sections; may be given more than once. Each node is checked against '
+        'every definition named after it or naming no node, together. Without '
+        'it, every node a section names is validated',
     )
     parser.add_argument(
         '--strict',

@@ -675,10 +675,24 @@ names it, and sections of other nodes in the same files are left out. This
 fits files shared by several nodes, such as a ros2_control configuration with
 several controllers, where the definition's root element is not the node name.
 A single definition is then used for the given node, and a node that no
-section applies to is an error, as the name is most likely misspelled. With
-several definitions, only those of the given nodes are read, so a definition
-of another node in the same files cannot fail the check. `--node` may be given
-more than once.
+section applies to is an error, as the name is most likely misspelled.
+`--node` may be given more than once.
+
+With several definitions, a node is checked against all that apply to it
+together, as a node that uses several parameter libraries: the definition named
+after the node, and every definition whose root element names no node. In
+`--strict` mode a parameter is unknown only if none of them declares it. A
+definition named after another node belongs to that node, and is not read if
+that node is not given, so it cannot fail the check.
+
+```bash
+generate_parameter_library_validate \
+  --param-definition src/motion_parameters.yaml \
+  --param-definition src/gripper_parameters.yaml \
+  --config config/grip_server.yaml \
+  --node grip_server \
+  --strict
+```
 
 ```bash
 generate_parameter_library_validate \
