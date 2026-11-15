@@ -33,7 +33,7 @@ import tempfile
 
 import pytest
 
-from generate_parameter_library_py.validate_config import main, validate
+from generate_parameter_library_py.validate_config import ConfigError, main, validate
 
 DEFINITION = """my_node:
   rate:
@@ -225,11 +225,11 @@ def test_array_element_type_is_checked(workspace, definition):
         """my_node:
   ros__parameters:
     mandatory_gain: 1.5
-    joints: ["a", 2]
+    joints: [1, 2]
 """,
     )
     found = errors(validate([definition], [config]))
-    assert 'element 1 of the array' in found[0].message
+    assert 'element 0 of the array' in found[0].message
 
 
 def test_fixed_size_array_is_checked(workspace, definition):
@@ -640,7 +640,7 @@ def test_quoted_number_element_is_not_a_double(workspace, definition):
     config = write(
         workspace,
         'config.yaml',
-        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n    offsets: ["1.0", 2.0]\n',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n    offsets: ["1.0", "2.0"]\n',
     )
     found = errors(validate([definition], [config]))
     assert len(found) == 1
@@ -788,6 +788,30 @@ def test_repeated_slash_in_a_node_name_is_rejected(workspace, definition):
         '/ns:\n  /my_node:\n    ros__parameters:\n      mandatory_gain: 1.5\n',
     )
     assert main(['--param-definition', definition, '--config', config]) == 1
+
+
+def test_mixed_array_fails_its_file_even_when_a_later_file_overrides_it(
+    workspace, definition
+):
+    """rcl_yaml_param_parser refuses ["a", 2], so a later file cannot fix it."""
+    mixed = write(
+        workspace,
+        'mixed.yaml',
+        'my_node:\n  ros__parameters:\n    joints: ["a", 2]\n',
+    )
+    good = write(
+        workspace,
+        'good.yaml',
+        'my_node:\n  ros__parameters:\n    joints: ["a", "b"]\n'
+        '    mandatory_gain: 1.5\n',
+    )
+    for configs in ([mixed, good], [good, mixed]):
+        args = ['--param-definition', definition]
+        for config in configs:
+            args += ['--config', config]
+        assert main(args) == 1, configs
+        with pytest.raises(ConfigError, match=r'my_node\.joints mixes string and int'):
+            validate([definition], configs)
 
 
 def test_bool_word_in_a_default_is_a_string(workspace):

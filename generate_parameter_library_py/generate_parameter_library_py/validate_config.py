@@ -529,7 +529,27 @@ def node_sections(document: Dict) -> Dict[str, Dict[str, Any]]:
     sections: Dict[str, Dict[str, Any]] = {}
     walk(document, '')
     if not sections:
-        return {'': document}
+        sections = {'': document}
+    # Checked per file, before merging: a later file cannot fix a file that
+    # rcl_yaml_param_parser refuses to load.
+    for name, tree in sections.items():
+        if not isinstance(tree, dict):
+            continue
+        for parameter, value in flatten(tree, name).items():
+            if not isinstance(value, list):
+                continue
+            scalar_types = list(
+                dict.fromkeys(
+                    yaml_type_name(element)
+                    for element in value
+                    if isinstance(element, (bool, int, float, str))
+                )
+            )
+            if len(scalar_types) > 1:
+                raise ConfigError(
+                    f'{parameter} mixes {" and ".join(scalar_types)} elements, '
+                    f'rcl_yaml_param_parser rejects the whole file'
+                )
     return sections
 
 
