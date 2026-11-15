@@ -17,6 +17,9 @@
 import ast
 import json
 import re
+import warnings
+
+import pytest
 
 from generate_parameter_library_py.generate_cpp_header import run as run_cpp
 from generate_parameter_library_py.generate_python_module import run as run_python
@@ -129,3 +132,25 @@ def test_python_module_keeps_descriptions(tmp_path):
         'description': 'say "hi" and end with a backslash \\',
         'additional_constraints': 'match \\d+ "digits"',
     }
+
+
+RST_DESCRIBED = r"""
+escaping_test:
+  angle:
+    type: double
+    default_value: 0.0
+    description: 'The error is normalized between :math:`-\pi, \pi`.'
+"""
+
+
+@pytest.mark.parametrize('definition', [DEFINITION, DESCRIBED, RST_DESCRIBED])
+def test_python_module_compiles_without_escape_warnings(tmp_path, definition):
+    """An unknown escape like `\\pi` only warns, so values alone would not catch it (#326)."""
+    yaml_file = tmp_path / 'parameters.yaml'
+    yaml_file.write_text(definition)
+    output = tmp_path / 'escaping_test.py'
+    run_python(str(output), str(yaml_file), '')
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        compile(output.read_text(), str(output), 'exec')
