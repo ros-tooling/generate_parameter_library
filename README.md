@@ -678,6 +678,10 @@ behave unexpectedly:
   reads as a bool
 * an empty sequence, which `rcl_yaml_param_parser` cannot give a type and reads
   as `PARAMETER_NOT_SET` rather than as an empty array
+* a sequence that mixes element types, such as `["a", 2]` or `[1, 2.5]`, which
+  makes `rcl_yaml_param_parser` reject the whole file; this is checked in each
+  file before merging, because a later file cannot override a file that does
+  not load
 * a value rejected by a built-in validator such as `bounds<>` or `one_of<>`
 * a parameter that is declared without a `default_value` and that the
   configuration does not set
