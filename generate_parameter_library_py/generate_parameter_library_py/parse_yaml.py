@@ -916,11 +916,15 @@ class GenerateCode:
     def parse(self, yaml_file, validate_header):
         with open(yaml_file) as f:
             try:
-                docs = yaml.load_all(f, Loader=yaml.Loader)
+                # SafeLoader: a definition is plain data, and a python/* tag in
+                # it must not run code during a build or a validation.
+                docs = yaml.load_all(f, Loader=yaml.SafeLoader)
                 doc = list(docs)[0]
             except ParserError as e:
                 raise compile_error(str(e))
             except ScannerError as e:
+                raise compile_error(str(e))
+            except yaml.YAMLError as e:
                 raise compile_error(str(e))
 
             if len(doc) != 1:
