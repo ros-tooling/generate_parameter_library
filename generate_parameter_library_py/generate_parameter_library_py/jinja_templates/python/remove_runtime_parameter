@@ -1,0 +1,22 @@
+{%- set base = "." ~ struct_name if struct_name != "" else "" -%}
+{% for map in parameter_map -%}
+{%- filter indent(width=4*loop.index0) %}
+for value_{{loop.index}} in current_params{{base}}{% for outer in parameter_map[:loop.index0] %}.get_entry(value_{{loop.index}}){% endfor %}.entry_names():
+{%- endfilter -%}
+{% endfor -%}
+{%- filter indent(width=4*(parameter_map|length)) %}
+{% for map in parameter_map -%}
+{% if not loop.first %}el{% endif %}if value_{{loop.index}} not in updated_params.{{mapped_params[loop.index0]}}:
+    updated_params{{base}}{% for outer in parameter_map[:loop.index0] %}.get_entry(value_{{loop.index}}){% endfor %}.remove_entry(value_{{loop.index}})
+    any_entry_changed = True
+{% endfor -%}
+{% endfilter -%}
+{% for mapped_param in mapped_params -%}
+{%- filter indent(width=4*loop.index0) %}
+for value_{{loop.index}} in updated_params.{{mapped_param}}:
+{%- endfilter -%}
+{% endfor -%}
+{%- filter indent(width=4*(mapped_params|length)) %}
+if {% for map in parameter_map %}{% if not loop.first %} or {% endif %}value_{{loop.index}} not in current_params{{base}}{% for outer in parameter_map[:loop.index0] %}.get_entry(value_{{loop.index}}){% endfor %}.entry_names(){% endfor %}:
+    any_entry_changed = True
+{% endfilter -%}

@@ -482,6 +482,11 @@ class TestParamsConsistency(unittest.TestCase):
         self.assertAlmostEqual(lib_value, new_value)
         self.assertAlmostEqual(lib_value, ros_value)
 
+    def test_refresh_without_key_changes_keeps_params(self):
+        before = self.listener.get_params()
+        self.listener.refresh_dynamic_parameters()
+        self.assertFalse(self.listener.is_old(before))
+
     def test_refresh_declares_added_mapped_parameters(self):
         joints = list(self.params.joints) + ['joint_new']
         self.node.set_parameters([Parameter('joints', value=joints)])
@@ -493,6 +498,44 @@ class TestParamsConsistency(unittest.TestCase):
             updated_params.pid.get_entry('joint_new').p,
             self.node.get_parameter('pid.joint_new.p').value,
         )
+
+    def test_refresh_removes_dropped_mapped_entries(self):
+        removed = self.params.joints[-1]
+        joints = list(self.params.joints[:-1])
+        kept = joints[0]
+        dof = self.params.dof_names[0]
+
+        self.node.set_parameters([Parameter('joints', value=joints)])
+        self.listener.refresh_dynamic_parameters()
+
+        # parameters stay declared, like in C++ where rclcpp cannot undeclare them
+        self.assertTrue(self.node.has_parameter(f'pid.{removed}.p'))
+        updated_params = self.listener.get_params()
+        updated_params.pid.get_entry(kept)
+        with self.assertRaises(AttributeError):
+            updated_params.pid.get_entry(removed)
+        with self.assertRaises(AttributeError):
+            updated_params.get_entry(removed)
+        with self.assertRaises(AttributeError):
+            updated_params.nested_dynamic.get_entry(removed)
+        with self.assertRaises(AttributeError):
+            updated_params.nested_dynamic.get_entry(kept).get_entry(dof).get_entry(
+                removed
+            )
+
+    def test_refresh_restores_mapped_entries_added_again(self):
+        all_joints = list(self.params.joints)
+        added_again = all_joints[-1]
+        new_value = 7.0
+        self.node.set_parameters([Parameter('joints', value=all_joints[:-1])])
+        self.listener.refresh_dynamic_parameters()
+        self.node.set_parameters([Parameter(f'pid.{added_again}.p', value=new_value)])
+
+        self.node.set_parameters([Parameter('joints', value=all_joints)])
+        self.listener.refresh_dynamic_parameters()
+
+        updated_params = self.listener.get_params()
+        self.assertAlmostEqual(updated_params.pid.get_entry(added_again).p, new_value)
 
     def test_update_map_gains_dof_k(self):
         dof = self.params.dof_names[0]

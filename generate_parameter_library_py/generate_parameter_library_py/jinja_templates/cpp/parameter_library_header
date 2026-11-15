@@ -168,17 +168,37 @@ struct StackParams {
       return output;
     }
 
+    /**
+     * @brief Syncs mapped parameters with their key lists, e.g. after `joints` changed
+     *
+     * Erases the entries of keys that were removed from a key list from the Params
+     * struct, then declares the parameters of new keys. The parameters of removed keys
+     * stay declared on the node, because rclcpp cannot undeclare statically typed
+     * parameters; adding the key again reuses them.
+     */
     void refresh_dynamic_parameters() {
       auto updated_params = get_params();
-      // TODO remove any destroyed dynamic parameters
+{%- if remove_dynamic_parameters|length %}
+      // erase the entries of keys that are no longer in their key list
+      const auto current_params = updated_params;
+      bool any_entry_changed = false;
 {%- filter indent(width=6) %}
 {{remove_dynamic_parameters}}
 {%- endfilter %}
+{%- endif %}
       // declare any new dynamic parameters
       rclcpp::Parameter param;
 {%- filter indent(width=6) %}
 {{update_declare_dynamic_parameters}}
 {%- endfilter %}
+{%- if remove_dynamic_parameters|length %}
+      // declaring a new parameter triggers update(), which stores it, but erased
+      // entries and keys whose parameters were already declared need storing here
+      if (any_entry_changed) {
+        updated_params.__stamp = clock_.now();
+        update_internal_params(updated_params);
+      }
+{%- endif %}
     }
 
     rcl_interfaces::msg::SetParametersResult update(const std::vector<rclcpp::Parameter> &parameters) {

@@ -93,15 +93,34 @@ self.stamp_ = Time()
             self.user_callback = None
 
         def refresh_dynamic_parameters(self):
+            """
+            Sync mapped parameters with their key lists, e.g. after `joints` changed.
+
+            Removes the entries of keys that were removed from a key list from the
+            Params object, then declares the parameters of new keys. The parameters of
+            removed keys stay declared on the node, like in the C++ library where rclcpp
+            cannot undeclare statically typed parameters; adding the key again reuses them.
+            """
             updated_params = self.get_params()
-            # TODO remove any destroyed dynamic parameters
-{%- filter indent(width=6) %}
+{%- if remove_dynamic_parameters|length %}
+            # remove the entries of keys that are no longer in their key list
+            current_params = self.get_params()
+            any_entry_changed = False
+{%- filter indent(width=12) %}
 {{remove_dynamic_parameters}}
 {%- endfilter %}
+{%- endif %}
             # declare any new dynamic parameters
 {%- filter indent(width=12) %}
 {{update_declare_dynamic_parameters}}
 {%- endfilter %}
+{%- if remove_dynamic_parameters|length %}
+            # declaring a new parameter triggers update(), which stores it, but removed
+            # entries and keys whose parameters were already declared need storing here
+            if any_entry_changed:
+                updated_params.stamp_ = self.clock_.now()
+                self.update_internal_params(updated_params)
+{%- endif %}
 
         def update(self, parameters):
             updated_params = self.get_params()

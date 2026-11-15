@@ -496,6 +496,12 @@ TEST_F(TestParamsConsistency, UpdateMapPidJointP) {
   EXPECT_DOUBLE_EQ(lib_value, ros_value);
 }
 
+TEST_F(TestParamsConsistency, RefreshWithoutKeyChangesKeepsParams) {
+  const auto before = param_listener_->get_params();
+  param_listener_->refresh_dynamic_parameters();
+  EXPECT_FALSE(param_listener_->is_old(before));
+}
+
 TEST_F(TestParamsConsistency, RefreshDeclaresAddedMappedParameters) {
   auto joints = params_.joints;
   joints.push_back("joint_new");
@@ -507,6 +513,48 @@ TEST_F(TestParamsConsistency, RefreshDeclaresAddedMappedParameters) {
   ASSERT_EQ(updated_params.pid.joints_map.count("joint_new"), 1u);
   EXPECT_DOUBLE_EQ(updated_params.pid.joints_map.at("joint_new").p,
                    node_->get_parameter("pid.joint_new.p").as_double());
+}
+
+TEST_F(TestParamsConsistency, RefreshRemovesDroppedMappedEntries) {
+  const std::string removed = params_.joints.back();
+  const std::vector<std::string> joints(params_.joints.begin(),
+                                        params_.joints.end() - 1);
+  const auto& kept = joints.front();
+  const auto& dof = params_.dof_names.front();
+
+  node_->set_parameters({rclcpp::Parameter("joints", joints)});
+  param_listener_->refresh_dynamic_parameters();
+
+  // rclcpp cannot undeclare statically typed parameters, so they stay
+  EXPECT_TRUE(node_->has_parameter(fmt::format("pid.{}.p", removed)));
+  auto updated_params = param_listener_->get_params();
+  EXPECT_EQ(updated_params.pid.joints_map.count(removed), 0u);
+  EXPECT_EQ(updated_params.pid.joints_map.count(kept), 1u);
+  EXPECT_EQ(updated_params.joints_map.count(removed), 0u);
+  EXPECT_EQ(updated_params.nested_dynamic.joints_map.count(removed), 0u);
+  EXPECT_EQ(updated_params.nested_dynamic.joints_map.at(kept)
+                .dof_names_map.at(dof)
+                .joints_map.count(removed),
+            0u);
+}
+
+TEST_F(TestParamsConsistency, RefreshRestoresMappedEntriesAddedAgain) {
+  const auto all_joints = params_.joints;
+  const std::string added_again = all_joints.back();
+  const double new_value = 7.0;
+  node_->set_parameters({rclcpp::Parameter(
+      "joints",
+      std::vector<std::string>(all_joints.begin(), all_joints.end() - 1))});
+  param_listener_->refresh_dynamic_parameters();
+  node_->set_parameters(
+      {rclcpp::Parameter(fmt::format("pid.{}.p", added_again), new_value)});
+
+  node_->set_parameters({rclcpp::Parameter("joints", all_joints)});
+  param_listener_->refresh_dynamic_parameters();
+
+  auto updated_params = param_listener_->get_params();
+  ASSERT_EQ(updated_params.pid.joints_map.count(added_again), 1u);
+  EXPECT_DOUBLE_EQ(updated_params.pid.joints_map.at(added_again).p, new_value);
 }
 
 TEST_F(TestParamsConsistency, UpdateMapGainsDofK) {

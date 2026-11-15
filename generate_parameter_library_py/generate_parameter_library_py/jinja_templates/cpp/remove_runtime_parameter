@@ -1,13 +1,29 @@
-{
-    std::set<std::string> {{mapped_param}}_set(updated_params.{{mapped_param}}.begin(), updated_params.{{mapped_param}}.end());
-    for (const auto &it: updated_params.{{parameter_map}}) {
-        if ({{mapped_param}}_set.find(it.first) == {{mapped_param}}_set.end()) {
-            {% if struct_name != "" %}
-            auto param_name = fmt::format("{}{}.{}.{}", prefix_, "{{struct_name}}", it.first, "{{parameter_field}}");
-            {% else %}
-            auto param_name = fmt::format("{}{}.{}", prefix_, it.first, "{{parameter_field}}");
-            {% endif -%}
-            parameters_interface_->undeclare_parameter(param_name);
-        }
-    }
+{%- set base = struct_name ~ "." if struct_name != "" else "" -%}
+{% for map in parameter_map -%}
+for (const auto & [value_{{loop.index}}, entry_{{loop.index}}] : {% if loop.first %}current_params.{{base}}{% else %}entry_{{loop.index0}}.{% endif %}{{map}}) {
+{% endfor -%}
+{%- filter indent(width=4) -%}
+{% for mapped_param in mapped_params -%}
+const bool keep_{{loop.index}} = std::find(updated_params.{{mapped_param}}.begin(), updated_params.{{mapped_param}}.end(), value_{{loop.index}}) != updated_params.{{mapped_param}}.end();
+{% endfor -%}
+{% for map in parameter_map -%}
+{% if not loop.first %}else {% endif %}if (!keep_{{loop.index}}) {
+    updated_params.{{base}}{% for outer in parameter_map[:loop.index0] %}{{outer}}.at(value_{{loop.index}}).{% endfor %}{{map}}.erase(value_{{loop.index}});
+    any_entry_changed = true;
 }
+{% endfor -%}
+{% endfilter -%}
+{%- for map in parameter_map -%}
+}
+{% endfor -%}
+{% for mapped_param in mapped_params -%}
+for (const auto & value_{{loop.index}} : updated_params.{{mapped_param}}) {
+{% endfor -%}
+{%- filter indent(width=4) -%}
+if ({% for map in parameter_map %}{% if not loop.first %} || {% endif %}current_params.{{base}}{% for outer in parameter_map[:loop.index0] %}{{outer}}.at(value_{{loop.index}}).{% endfor %}{{map}}.count(value_{{loop.index}}) == 0{% endfor %}) {
+    any_entry_changed = true;
+}
+{% endfilter -%}
+{%- for mapped_param in mapped_params -%}
+}
+{% endfor -%}
