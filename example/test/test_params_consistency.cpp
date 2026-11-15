@@ -496,6 +496,19 @@ TEST_F(TestParamsConsistency, UpdateMapPidJointP) {
   EXPECT_DOUBLE_EQ(lib_value, ros_value);
 }
 
+TEST_F(TestParamsConsistency, RefreshDeclaresAddedMappedParameters) {
+  auto joints = params_.joints;
+  joints.push_back("joint_new");
+  node_->set_parameters({rclcpp::Parameter("joints", joints)});
+  param_listener_->refresh_dynamic_parameters();
+
+  ASSERT_TRUE(node_->has_parameter("pid.joint_new.p"));
+  auto updated_params = param_listener_->get_params();
+  ASSERT_EQ(updated_params.pid.joints_map.count("joint_new"), 1u);
+  EXPECT_DOUBLE_EQ(updated_params.pid.joints_map.at("joint_new").p,
+                   node_->get_parameter("pid.joint_new.p").as_double());
+}
+
 TEST_F(TestParamsConsistency, UpdateMapGainsDofK) {
   const auto& dof = params_.dof_names[0];
   const std::string param_name = fmt::format("gains.{}.k", dof);

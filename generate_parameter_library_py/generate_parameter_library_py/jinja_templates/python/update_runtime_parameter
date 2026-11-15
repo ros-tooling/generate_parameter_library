@@ -15,9 +15,9 @@ if param.name == param_name:
 {{parameter_validations-}}
 {% endif -%}
 {% if struct_name != "" %}
-updated_params.{{struct_name}}{% for map in parameter_map%}.get_entry(value_{{loop.index}}){% endfor %}.{{parameter_field}} = param.{{parameter_as_function}}
+updated_params.{{struct_name}}{% for map in parameter_map%}.add_entry(value_{{loop.index}}){% endfor %}.{{parameter_field}} = param.{{parameter_as_function}}
 {% else %}
-updated_params{% for map in parameter_map%}.get_entry(value_{{loop.index}}){% endfor %}.{{parameter_field}} = param.{{parameter_as_function}}
+updated_params{% for map in parameter_map%}.add_entry(value_{{loop.index}}){% endfor %}.{{parameter_field}} = param.{{parameter_as_function}}
 {% endif -%}
 any_param_updated = True
 self.logger_.debug(param.name + ": " + param.type_.name + " = " + str(param.value))

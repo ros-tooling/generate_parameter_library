@@ -482,6 +482,18 @@ class TestParamsConsistency(unittest.TestCase):
         self.assertAlmostEqual(lib_value, new_value)
         self.assertAlmostEqual(lib_value, ros_value)
 
+    def test_refresh_declares_added_mapped_parameters(self):
+        joints = list(self.params.joints) + ['joint_new']
+        self.node.set_parameters([Parameter('joints', value=joints)])
+        self.listener.refresh_dynamic_parameters()
+
+        self.assertTrue(self.node.has_parameter('pid.joint_new.p'))
+        updated_params = self.listener.get_params()
+        self.assertAlmostEqual(
+            updated_params.pid.get_entry('joint_new').p,
+            self.node.get_parameter('pid.joint_new.p').value,
+        )
+
     def test_update_map_gains_dof_k(self):
         dof = self.params.dof_names[0]
         param_name = f'gains.{dof}.k'
