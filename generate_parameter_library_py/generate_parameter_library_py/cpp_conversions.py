@@ -30,12 +30,7 @@
 
 import json
 from typing import List, Union
-from jinja2 import Template
 from typeguard import typechecked
-import os
-import yaml
-from yaml.parser import ParserError
-from yaml.scanner import ScannerError
 
 
 class CPPConversions:

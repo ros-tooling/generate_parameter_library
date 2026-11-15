@@ -299,7 +299,6 @@ class CodeGenVariableBase:
 
         self.name = name
         self.default_value = default_value
-        self.name = name
         self.param_name = param_name
         # Size of a fixed size type, set by CodeGenFixedVariable.process_type.
         self.fixed_size = None
@@ -343,10 +342,10 @@ class CodeGenVariableBase:
             return self.conversion.python_val_to_yaml_type[str(type(arg[0]))]
 
     def process_type(self, defined_type):
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def get_parameter_type(self):
-        raise NotImplemented()
+        raise NotImplementedError()
 
 
 class CodeGenVariable(CodeGenVariableBase):
@@ -891,7 +890,7 @@ class GenerateCode:
             self.comments = '.. auto-generated DO NOT EDIT'
         elif language == 'markdown':
             self.comments = '<!--- auto-generated DO NOT EDIT -->'
-        elif language == 'python' or language == 'markdown':
+        elif language == 'python':
             self.comments = '# auto-generated DO NOT EDIT'
         else:
             raise compile_error(
@@ -916,11 +915,15 @@ class GenerateCode:
     def parse(self, yaml_file, validate_header):
         with open(yaml_file) as f:
             try:
-                docs = yaml.load_all(f, Loader=yaml.Loader)
+                # SafeLoader: a definition is plain data, and a python/* tag in
+                # it must not run code during a build or a validation.
+                docs = yaml.load_all(f, Loader=yaml.SafeLoader)
                 doc = list(docs)[0]
             except ParserError as e:
                 raise compile_error(str(e))
             except ScannerError as e:
+                raise compile_error(str(e))
+            except yaml.YAMLError as e:
                 raise compile_error(str(e))
 
             if len(doc) != 1:
@@ -1037,9 +1040,14 @@ class GenerateCode:
             self.declare_parameter_sets.append(declare_parameter_set)
 
     def parse_dict(self, name, root_map, nested_name):
-        if isinstance(root_map, dict) and isinstance(
-            next(iter(root_map.values())), dict
-        ):
+        # A string `type` marks a parameter whatever order its fields are in,
+        # while a group only holds mappings (possibly a parameter named `type`).
+        is_group = (
+            isinstance(root_map, dict)
+            and not isinstance(root_map.get('type'), str)
+            and any(isinstance(value, dict) for value in root_map.values())
+        )
+        if is_group:
             cur_struct_tree = self.struct_tree
             cur_stack_struct_tree = self.stack_struct_tree
 
