@@ -456,6 +456,37 @@ def test_install_skip_build_in_a_second_process_installs_definition(tmp_path):
     assert read(path) == PARAMETERS_YAML
 
 
+def test_install_registers_no_absolute_path_with_include_package_data(tmp_path):
+    """setuptools without the build dir filter rejects absolute SOURCES.txt entries."""
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    with open(os.path.join(root, 'setup.py')) as f:
+        setup_py = f.read()
+    with open(os.path.join(root, 'setup.py'), 'w') as f:
+        f.write(
+            setup_py.replace(
+                "packages=['probe'],", "packages=['probe'], include_package_data=True,"
+            )
+        )
+    prefix = os.path.join(str(tmp_path), 'install')
+    # the default, relative build base: egg_info only prunes the build base by
+    # its given spelling, so the absolute staged path would stay in SOURCES.txt
+    run_setup(
+        root,
+        'install',
+        '--prefix',
+        prefix,
+        '--install-data',
+        prefix,
+        '--record',
+        os.path.join(str(tmp_path), 'install.log'),
+        '--single-version-externally-managed',
+    )
+
+    assert read(installed_definition(prefix)) == PARAMETERS_YAML
+    sources = read(os.path.join(root, 'probe.egg-info', 'SOURCES.txt')).splitlines()
+    assert [s for s in sources if os.path.isabs(s)] == []
+
+
 def test_install_installs_symlinked_definition_as_file(tmp_path):
     root = write_package(str(tmp_path / 'src'), 'config/parameters.yaml')
     os.symlink(

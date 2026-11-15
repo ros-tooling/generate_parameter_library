@@ -153,7 +153,7 @@ def _install_definitions(command, specs, link):
         shutil.copyfile(source, target)
     entry = (
         os.path.join('share', command.distribution.get_name(), 'parameter_definitions'),
-        staged,
+        [_relative_to_cwd(path) for path in staged],
     )
     distribution = command.distribution
     if distribution.data_files is None:
@@ -165,6 +165,20 @@ def _install_definitions(command, specs, link):
     for other in distribution.command_obj.values():
         if isinstance(other, install_data) and other.data_files is None:
             other.data_files = distribution.data_files
+
+
+def _relative_to_cwd(path):
+    """Spell a staged file relative to the working directory, like data_files.
+
+    install_data resolves relative names against the working directory. An
+    absolute name would end up in SOURCES.txt, which setuptools without its
+    build directory filter (e.g. 59.6 on Ubuntu 22.04) rejects with
+    "setup script specifies an absolute path" when include_package_data is set.
+    """
+    try:
+        return os.path.relpath(path)
+    except ValueError:  # no relative path, e.g. on another drive on Windows
+        return path
 
 
 def _source_package_root(command):
