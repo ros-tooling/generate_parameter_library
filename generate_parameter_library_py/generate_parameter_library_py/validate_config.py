@@ -529,34 +529,7 @@ def node_sections(document: Dict) -> Dict[str, Dict[str, Any]]:
     sections: Dict[str, Dict[str, Any]] = {}
     walk(document, '')
     if not sections:
-        sections = {'': document}
-    # Checked per file, before merging: a later file cannot fix a file that
-    # rcl_yaml_param_parser refuses to load. It refuses a sequence with mixed
-    # element types and one that holds two or more nested sequences.
-    for name, tree in sections.items():
-        if not isinstance(tree, dict):
-            continue
-        for parameter, value in flatten(tree, name).items():
-            if not isinstance(value, list):
-                continue
-            nested = sum(isinstance(element, list) for element in value)
-            if nested > 1:
-                raise ConfigError(
-                    f'{parameter} holds {nested} nested sequences, '
-                    f'rcl_yaml_param_parser rejects the whole file'
-                )
-            scalar_types = list(
-                dict.fromkeys(
-                    yaml_type_name(element)
-                    for element in value
-                    if isinstance(element, (bool, int, float, str))
-                )
-            )
-            if len(scalar_types) > 1:
-                raise ConfigError(
-                    f'{parameter} mixes {" and ".join(scalar_types)} elements, '
-                    f'rcl_yaml_param_parser rejects the whole file'
-                )
+        return {'': document}
     return sections
 
 
@@ -722,15 +695,85 @@ class ConfigError(Exception):
     """A file could not be read or parsed, reported without a traceback."""
 
 
-def load_yaml(path: str) -> Dict:
+def rcl_scalar_type(node: yaml.ScalarNode) -> str:
+    """Name the type rcl_yaml_param_parser gives a scalar in a sequence."""
+    if node.style in QUOTED_STYLES:
+        return 'string'
+    resolved = {
+        'tag:yaml.org,2002:bool': 'bool',
+        'tag:yaml.org,2002:int': 'int',
+        'tag:yaml.org,2002:float': 'double',
+    }.get(node.tag)
+    if resolved:
+        return resolved
+    # PyYAML leaves y, n and numbers like 1e5 as text, ROS 2 does not
+    if reads_as_bool(node.value):
+        return 'bool'
+    if reads_as_number(node.value, 'int'):
+        return 'int'
+    if reads_as_number(node.value, 'double'):
+        return 'double'
+    return 'string'
+
+
+def check_sequences(node: yaml.Node, keys: Tuple[str, ...] = ()) -> None:
+    """Raise ConfigError for a sequence that makes rcl_yaml_param_parser reject the file.
+
+    It rejects a sequence that mixes element types and one that holds two or
+    more nested sequences. The check runs on the YAML nodes, before PyYAML
+    builds mappings, because rcl_yaml_param_parser reads every occurrence of a
+    repeated key or node, while PyYAML and the merging keep only the last one.
+    """
+    if isinstance(node, yaml.MappingNode):
+        for key, value in node.value:
+            check_sequences(value, keys + (str(key.value),))
+        return
+    if not isinstance(node, yaml.SequenceNode):
+        return
+    name = '.'.join(k for k in keys if k != ROS_PARAMETERS_KEY)
+    where = f'{name} (line {node.start_mark.line + 1})'
+    nested = [child for child in node.value if isinstance(child, yaml.SequenceNode)]
+    if len(nested) > 1:
+        raise ConfigError(
+            f'{where} holds {len(nested)} nested sequences, '
+            f'rcl_yaml_param_parser rejects the whole file'
+        )
+    scalar_types = list(
+        dict.fromkeys(
+            rcl_scalar_type(child)
+            for child in node.value
+            if isinstance(child, yaml.ScalarNode)
+        )
+    )
+    if len(scalar_types) > 1:
+        raise ConfigError(
+            f'{where} mixes {" and ".join(scalar_types)} elements, '
+            f'rcl_yaml_param_parser rejects the whole file'
+        )
+    for child in nested:
+        check_sequences(child, keys)
+
+
+def load_yaml(path: str, is_config: bool = False) -> Dict:
+    """Load a YAML mapping; for a config, also apply the checks of check_sequences."""
     try:
         with open(path) as handle:
             # The custom loader remembers which scalars were quoted, which is
             # what decides the type ROS 2 gives them at runtime.
-            document = yaml.load(handle, Loader=ConfigLoader)
+            loader = ConfigLoader(handle)
+            try:
+                root = loader.get_single_node()
+                # a definition is never read by rcl_yaml_param_parser
+                if is_config and root is not None:
+                    check_sequences(root)
+                document = None if root is None else loader.construct_document(root)
+            finally:
+                loader.dispose()
     except OSError as error:
         raise ConfigError(f'{path}: {error.strerror or error}')
     except yaml.YAMLError as error:
+        raise ConfigError(f'{path}: {error}')
+    except ConfigError as error:
         raise ConfigError(f'{path}: {error}')
     if document is None:
         return {}
@@ -741,7 +784,7 @@ def load_yaml(path: str) -> Dict:
 
 def read_config(path: str) -> Dict[str, Dict[str, Any]]:
     """Load a configuration file and split it into its node sections."""
-    document = load_yaml(path)
+    document = load_yaml(path, is_config=True)
     try:
         return node_sections(document)
     except ConfigError as error:
