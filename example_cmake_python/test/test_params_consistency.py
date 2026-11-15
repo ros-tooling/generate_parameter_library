@@ -511,7 +511,7 @@ class TestParamsConsistency(unittest.TestCase):
         # parameters stay declared, like in C++ where rclcpp cannot undeclare them
         self.assertTrue(self.node.has_parameter(f'pid.{removed}.p'))
         updated_params = self.listener.get_params()
-        updated_params.pid.get_entry(kept)
+        self.assertEqual(updated_params.pid.entry_names(), joints)
         with self.assertRaises(AttributeError):
             updated_params.pid.get_entry(removed)
         with self.assertRaises(AttributeError):
