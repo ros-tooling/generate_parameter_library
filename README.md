@@ -682,7 +682,9 @@ behave unexpectedly:
   that holds two or more nested sequences, such as `[["a"], ["b"]]`, which
   makes `rcl_yaml_param_parser` reject the whole file; this is checked in each
   file before merging, because a later file cannot override a file that does
-  not load
+  not load, and for every occurrence of a repeated key or node; the element
+  types are the ones ROS 2 reads, so `[1e5, 2.0]` is accepted while
+  `["1e5", 1e5]` is not
 * a value rejected by a built-in validator such as `bounds<>` or `one_of<>`
 * a parameter that is declared without a `default_value` and that the
   configuration does not set
