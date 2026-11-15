@@ -433,6 +433,29 @@ def test_install_installs_definition(tmp_path):
     assert read(path) == PARAMETERS_YAML
 
 
+def test_install_skip_build_in_a_second_process_installs_definition(tmp_path):
+    """Packaging tools may build and install in separate setup.py runs."""
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    prefix = os.path.join(str(tmp_path), 'install')
+    # the default build base, as install --skip-build cannot be told another one
+    run_setup(root, 'build')
+    run_setup(
+        root,
+        'install',
+        '--skip-build',
+        '--prefix',
+        prefix,
+        '--install-data',
+        prefix,
+        '--record',
+        os.path.join(str(tmp_path), 'install.log'),
+        '--single-version-externally-managed',
+    )
+    path = installed_definition(prefix)
+
+    assert read(path) == PARAMETERS_YAML
+
+
 def test_install_installs_symlinked_definition_as_file(tmp_path):
     root = write_package(str(tmp_path / 'src'), 'config/parameters.yaml')
     os.symlink(

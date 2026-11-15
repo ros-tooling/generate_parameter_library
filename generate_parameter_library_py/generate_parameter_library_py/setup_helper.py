@@ -32,6 +32,7 @@ import shutil
 
 from setuptools.command.build_py import build_py
 from setuptools.command.develop import develop
+from setuptools.command.install import install
 
 # after setuptools, which provides distutils on Python >= 3.12
 from distutils.command.install_data import install_data  # noqa: I100
@@ -192,6 +193,10 @@ def parameter_cmdclass(
     which colcon runs when such a build is rebuilt without
     ``--symlink-install``, removes them from there again. A module that is no
     longer generated, e.g. after renaming it, is removed on the next build.
+
+    The definitions are installed as
+    ``share/<distribution>/parameter_definitions/<module_name>.yaml``, also by an
+    ``install --skip-build`` that runs in a separate process from the build.
     """
     if modules is None:
         modules = [
@@ -271,7 +276,16 @@ def parameter_cmdclass(
                 _install_definitions(build_py_cmd, specs, link=True)
             super().run()
 
-    return {'build_py': BuildPy, 'develop': Develop}
+    class Install(install):
+        def run(self):
+            # Also registered here, as `install --skip-build` in a process that
+            # did not run build_py, e.g. a separate packaging step, would not
+            # install the definitions otherwise. Before install runs, because it
+            # only runs install_data when there are data files.
+            _install_definitions(self, specs, link=False)
+            super().run()
+
+    return {'build_py': BuildPy, 'develop': Develop, 'install': Install}
 
 
 def generate_parameter_module(
