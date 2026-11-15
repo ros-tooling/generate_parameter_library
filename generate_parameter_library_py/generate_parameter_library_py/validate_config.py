@@ -531,13 +531,20 @@ def node_sections(document: Dict) -> Dict[str, Dict[str, Any]]:
     if not sections:
         sections = {'': document}
     # Checked per file, before merging: a later file cannot fix a file that
-    # rcl_yaml_param_parser refuses to load.
+    # rcl_yaml_param_parser refuses to load. It refuses a sequence with mixed
+    # element types and one that holds two or more nested sequences.
     for name, tree in sections.items():
         if not isinstance(tree, dict):
             continue
         for parameter, value in flatten(tree, name).items():
             if not isinstance(value, list):
                 continue
+            nested = sum(isinstance(element, list) for element in value)
+            if nested > 1:
+                raise ConfigError(
+                    f'{parameter} holds {nested} nested sequences, '
+                    f'rcl_yaml_param_parser rejects the whole file'
+                )
             scalar_types = list(
                 dict.fromkeys(
                     yaml_type_name(element)

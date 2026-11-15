@@ -814,6 +814,28 @@ def test_mixed_array_fails_its_file_even_when_a_later_file_overrides_it(
             validate([definition], configs)
 
 
+def test_several_nested_sequences_fail_their_file_even_when_overridden(
+    workspace, definition
+):
+    """rcl_yaml_param_parser refuses [["a"], ["b"]], so a later file cannot fix it."""
+    nested = write(
+        workspace,
+        'nested.yaml',
+        'my_node:\n  ros__parameters:\n    joints: [["a"], ["b"]]\n',
+    )
+    good = write(
+        workspace,
+        'good.yaml',
+        'my_node:\n  ros__parameters:\n    joints: ["a", "b"]\n'
+        '    mandatory_gain: 1.5\n',
+    )
+    for configs in ([nested, good], [good, nested]):
+        with pytest.raises(
+            ConfigError, match=r'my_node\.joints holds 2 nested sequences'
+        ):
+            validate([definition], configs)
+
+
 def test_bool_word_in_a_default_is_a_string(workspace):
     """A default_value is compiled into the node, not parsed as config text."""
     definition = write(
