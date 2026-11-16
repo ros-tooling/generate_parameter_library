@@ -680,6 +680,9 @@ With `--node`, the node is checked against the definition named after it and
 every definition whose root element names no node, together, as for a node that
 uses several parameter libraries, such as a controller and its plugin. In
 `--strict` mode a parameter is unknown only if none of them declares it. A
+parameter that several of them declare takes the default of the first given
+definition, as the node keeps the first declaration, and its value has to pass
+the type and validators of every one, as every library reads it back. A
 definition named after another node belongs to that node and is only read if
 that node is given too, and a single definition is used for every given node.
 
