@@ -595,14 +595,73 @@ def test_node_option_leaves_a_definition_to_the_node_it_names(workspace):
     ]
 
 
-def test_node_option_checks_a_parameter_of_two_definitions_once(workspace):
-    """The node keeps the first declaration, the later library skips it."""
+def test_node_option_checks_a_parameter_against_every_definition(workspace):
+    """Each library reads the parameter back as its own type, so both must accept it."""
     part_a = write(workspace, 'part_a.yaml', PART_A)
     as_int = write(workspace, 'as_int.yaml', 'part_c:\n  gain:\n    type: int\n')
     config = write(workspace, 'config.yaml', COMBINED)
-    assert errors(validate([part_a, as_int], [config], nodes=['my_node'])) == []
-    found = errors(validate([as_int, part_a], [config], nodes=['my_node']))
+    for order in ([part_a, as_int], [as_int, part_a]):
+        found = errors(validate(order, [config], nodes=['my_node']))
+        assert [d.location for d in found] == ['my_node.gain']
+
+
+def test_node_option_runs_the_validators_of_every_definition(workspace):
+    """A later library still validates the value the node holds."""
+    part_a = write(workspace, 'part_a.yaml', PART_A)
+    positive = write(
+        workspace,
+        'positive.yaml',
+        'part_c:\n  gain:\n    type: double\n    validation:\n      gt<>: [0]\n',
+    )
+    config = write(workspace, 'config.yaml', COMBINED.replace('1.5', '-1.0'))
+    found = errors(validate([part_a, positive], [config], nodes=['my_node']))
     assert [d.location for d in found] == ['my_node.gain']
+
+
+def test_node_option_validates_the_first_default_with_every_definition(workspace):
+    """The node holds the first declaration's default, and every library checks it."""
+    negative = write(
+        workspace,
+        'negative.yaml',
+        'part_a:\n  gain:\n    type: double\n    default_value: -1.0\n',
+    )
+    positive = write(
+        workspace,
+        'positive.yaml',
+        'part_c:\n  gain:\n    type: double\n    default_value: 1.0\n'
+        '    validation:\n      gt<>: [0]\n',
+    )
+    config = write(workspace, 'config.yaml', 'my_node:\n  ros__parameters: {}\n')
+    found = errors(validate([negative, positive], [config], nodes=['my_node']))
+    assert [d.location for d in found] == ['my_node.gain']
+    assert '-1.0' in found[0].message
+    assert errors(validate([positive, negative], [config], nodes=['my_node'])) == []
+
+
+def test_node_option_expands_maps_over_the_first_default(workspace):
+    """A later library maps over the key list the node holds, not its own default."""
+    shoulder = write(
+        workspace,
+        'shoulder.yaml',
+        'part_a:\n  joints:\n    type: string_array\n    default_value: [shoulder]\n',
+    )
+    elbow = write(
+        workspace,
+        'elbow.yaml',
+        'part_c:\n  joints:\n    type: string_array\n    default_value: [elbow]\n'
+        '  pid:\n    __map_joints:\n      p:\n        type: double\n'
+        '        validation:\n          gt<>: [0]\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    pid:\n      shoulder:\n        p: -1.0\n',
+    )
+    found = errors(
+        validate([shoulder, elbow], [config], strict=True, nodes=['my_node'])
+    )
+    assert [d.location for d in found] == ['my_node.pid.shoulder.p']
+    assert 'unknown' not in found[0].message
 
 
 def test_node_option_checks_a_node_that_only_wildcards_apply_to(workspace, definition):

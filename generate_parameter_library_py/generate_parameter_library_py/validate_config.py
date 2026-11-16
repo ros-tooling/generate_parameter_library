@@ -508,14 +508,18 @@ def load_node_definitions(
 
 
 def declared_parameters(
-    generator, values: Dict[str, Any]
+    generator,
+    values: Dict[str, Any],
+    earlier: Optional[Dict[str, DeclaredParameter]] = None,
 ) -> Tuple[Dict[str, DeclaredParameter], List[str]]:
     """Flatten a definition into dotted names, expanding mapped parameters.
 
     Parameters of type none are left out. The generator declares nothing for
     them, so the node neither requires them nor gives them a type; their names
     are returned separately so that the strict check can leave their subtree
-    alone.
+    alone. `earlier` holds the parameters that libraries loaded before this one
+    already declared: the node keeps their default, so a map is expanded over
+    that key list instead of this definition's own default.
     """
     parameters = {}
     free_form = []
@@ -531,7 +535,10 @@ def declared_parameters(
             free_form.append(template.name)
             continue
         names = expand_mapped_name(
-            template.name, declaration.mapped_params, values, parameters
+            template.name,
+            declaration.mapped_params,
+            values,
+            {**parameters, **(earlier or {})},
         )
         if names is None:
             continue
@@ -673,18 +680,22 @@ def validate_section(
 ) -> List[Diagnostic]:
     """Validate one node's parameters against the definitions it uses.
 
-    A parameter that several definitions declare is checked against the first,
-    as the node keeps the first declaration and the later libraries skip it. In
-    strict mode a parameter is unknown if none of the definitions declares it.
+    A parameter that several definitions declare is declared by the first
+    library, so its default applies. Every library then reads the node's value
+    as its own type and runs its own validators on it, so the value is checked
+    against every declaration. In strict mode a parameter is unknown if none of
+    the definitions declares it.
     """
     diagnostics = []
-    parameters: Dict[str, DeclaredParameter] = {}
+    declarations: Dict[str, List[DeclaredParameter]] = {}
     free_form: List[str] = []
     for generator in generators:
-        declared, free = declared_parameters(generator, values)
+        first = {name: found[0] for name, found in declarations.items()}
+        declared, free = declared_parameters(generator, values, first)
         for name, parameter in declared.items():
-            parameters.setdefault(name, parameter)
+            declarations.setdefault(name, []).append(parameter)
         free_form += free
+    parameters = {name: found[0] for name, found in declarations.items()}
 
     for name, parameter in sorted(parameters.items()):
         where = join_name(location, name)
@@ -705,13 +716,16 @@ def validate_section(
             # the generator already did that at build time, and the rules in
             # check_type are about how rcl_yaml_param_parser reads text, which
             # does not apply to a compiled-in literal such as [] or 1.
-            problem = None
-            for severity, message in run_validations(
-                parameter, runtime_default(parameter)
-            ):
-                if severity == ERROR:
-                    problem = message
-                    break
+            default = runtime_default(parameter)
+            problem = next(
+                (
+                    message
+                    for declaration in declarations[name]
+                    for severity, message in run_validations(declaration, default)
+                    if severity == ERROR
+                ),
+                None,
+            )
             if problem is not None:
                 diagnostics.append(
                     Diagnostic(
@@ -733,14 +747,17 @@ def validate_section(
                 )
             continue
 
-        value = values[name]
-        problem = check_type(parameter, value)
-        if problem is not None:
-            diagnostics.append(Diagnostic(ERROR, where, problem))
-            continue
-        value = coerce_value(parameter, value)
-        for severity, message in run_validations(parameter, value):
-            diagnostics.append(Diagnostic(severity, where, message))
+        found = []
+        for declaration in declarations[name]:
+            problem = check_type(declaration, values[name])
+            if problem is not None:
+                found.append(Diagnostic(ERROR, where, problem))
+                break
+            value = coerce_value(declaration, values[name])
+            for severity, message in run_validations(declaration, value):
+                found.append(Diagnostic(severity, where, message))
+        # libraries that share a declaration report the same problem once
+        diagnostics.extend(d for i, d in enumerate(found) if d not in found[:i])
 
     if strict:
         unknown = [
