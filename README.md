@@ -685,6 +685,8 @@ behave unexpectedly:
   not load, and for every occurrence of a repeated key or node; the element
   types are the ones ROS 2 reads, so `[1e5, 2.0]` is accepted while
   `["1e5", 1e5]` is not
+* a YAML alias such as `*base` or a merge key `<<: *base`, which
+  `rcl_yaml_param_parser` does not support, so it rejects the whole file
 * a value rejected by a built-in validator such as `bounds<>` or `one_of<>`
 * a parameter that is declared without a `default_value` and that the
   configuration does not set
