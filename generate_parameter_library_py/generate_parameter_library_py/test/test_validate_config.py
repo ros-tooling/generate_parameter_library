@@ -1064,3 +1064,34 @@ def test_main_returns_zero_on_success(workspace, definition):
 """,
     )
     assert main(['--param-definition', definition, '--config', config]) == 0
+
+
+@pytest.mark.parametrize(
+    'parameters, line',
+    [
+        ('    joints: &loop [*loop]\n', 3),
+        ('    pid: &loop\n      inner: *loop\n', 4),
+        ('    joints: &shared [a, b]\n    names: *shared\n', 4),
+        ('    base: &base {p: 1.0}\n    pid:\n      <<: *base\n', 5),
+    ],
+    ids=['recursive_sequence', 'recursive_mapping', 'shared', 'merge_key'],
+)
+def test_alias_fails_its_file(workspace, definition, parameters, line):
+    """rcl_yaml_param_parser rejects any alias, which also rules out a cycle."""
+    config = write(
+        workspace, 'alias.yaml', 'my_node:\n  ros__parameters:\n' + parameters
+    )
+    with pytest.raises(ConfigError, match=f'alias.*line {line}'):
+        validate([definition], [config])
+
+
+def test_alias_in_a_definition_is_allowed(workspace):
+    """A definition is read by PyYAML only, which resolves aliases."""
+    aliased = write(
+        workspace,
+        'aliased.yaml',
+        'my_node:\n  gain: &gain\n    type: double\n    default_value: 1.0\n'
+        '  other_gain: *gain\n',
+    )
+    config = write(workspace, 'config.yaml', 'my_node:\n  ros__parameters: {}\n')
+    assert errors(validate([aliased], [config])) == []

@@ -99,6 +99,25 @@ class ConfigLoader(yaml.SafeLoader):
 ConfigLoader.add_constructor('tag:yaml.org,2002:str', _construct_scalar_text)
 
 
+class ParameterFileLoader(ConfigLoader):
+    """A ConfigLoader that rejects aliases, as rcl_yaml_param_parser does.
+
+    Stopping at the alias event also keeps a recursive one such as
+    `&loop [*loop]` from reaching the recursive checks.
+    """
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise yaml.composer.ComposerError(
+                None,
+                None,
+                'rcl_yaml_param_parser does not support aliases and rejects the '
+                'whole file',
+                self.peek_event().start_mark,
+            )
+        return super().compose_node(parent, index)
+
+
 @dataclass
 class Diagnostic:
     """One finding, printed as a single line."""
@@ -760,7 +779,7 @@ def load_yaml(path: str, is_config: bool = False) -> Dict:
         with open(path) as handle:
             # The custom loader remembers which scalars were quoted, which is
             # what decides the type ROS 2 gives them at runtime.
-            loader = ConfigLoader(handle)
+            loader = (ParameterFileLoader if is_config else ConfigLoader)(handle)
             try:
                 root = loader.get_single_node()
                 # a definition is never read by rcl_yaml_param_parser
