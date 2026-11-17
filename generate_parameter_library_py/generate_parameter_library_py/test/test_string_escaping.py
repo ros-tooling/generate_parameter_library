@@ -48,12 +48,13 @@ def write_definition(tmp_path):
 
 
 def python_assignments(source):
-    """Map each `self.<name> = <literal>` in the generated module to its value."""
+    """Map each `<name> = <literal>` in the generated module to its value."""
     values = {}
     for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Attribute):
+        # humble declares the fields at class scope (`name = ...`), not per instance
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
             try:
-                values[node.targets[0].attr] = ast.literal_eval(node.value)
+                values[node.targets[0].id] = ast.literal_eval(node.value)
             except ValueError:
                 pass
     return values
