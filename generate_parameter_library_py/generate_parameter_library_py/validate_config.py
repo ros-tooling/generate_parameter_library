@@ -472,15 +472,54 @@ def load_definitions(
     return generators, unused, duplicates
 
 
+def load_node_definitions(
+    paths: List[str],
+    configs: List[Tuple[str, Dict[str, Dict[str, Any]]]],
+    selected: Set[str],
+) -> Tuple[List[Tuple[str, Any]], List[str]]:
+    """Parse the definitions that apply to the selected nodes.
+
+    A definition whose root element names a node, selected or with a section in
+    the configs, belongs to that node; any other definition, such as the one of
+    a parameter library that a node uses next to others, applies to every
+    selected node. The definitions of nodes that are not selected are left out,
+    so a broken one does not fail the run, unless it is the only definition,
+    which is used for every node. Returns the parsed (namespace, definition)
+    pairs in the given order and the paths that were left out.
+    """
+    if len(paths) == 1:
+        generator = read_definition(paths[0])
+        return [(generator.namespace, generator)], []
+    named = {
+        node_name_of(name)
+        for _, sections in configs
+        for name in sections
+        if name and not is_wildcard_node(name)
+    }
+    definitions = []
+    unused = []
+    for path in paths:
+        namespace = definition_namespace(path)
+        if namespace in named and namespace not in selected:
+            unused.append(path)
+        else:
+            definitions.append((namespace, read_definition(path)))
+    return definitions, unused
+
+
 def declared_parameters(
-    generator, values: Dict[str, Any]
+    generator,
+    values: Dict[str, Any],
+    earlier: Optional[Dict[str, DeclaredParameter]] = None,
 ) -> Tuple[Dict[str, DeclaredParameter], List[str]]:
     """Flatten a definition into dotted names, expanding mapped parameters.
 
     Parameters of type none are left out. The generator declares nothing for
     them, so the node neither requires them nor gives them a type; their names
     are returned separately so that the strict check can leave their subtree
-    alone.
+    alone. `earlier` holds the parameters that libraries loaded before this one
+    already declared: the node keeps their default, so a map is expanded over
+    that key list instead of this definition's own default.
     """
     parameters = {}
     free_form = []
@@ -496,7 +535,10 @@ def declared_parameters(
             free_form.append(template.name)
             continue
         names = expand_mapped_name(
-            template.name, declaration.mapped_params, values, parameters
+            template.name,
+            declaration.mapped_params,
+            values,
+            {**parameters, **(earlier or {})},
         )
         if names is None:
             continue
@@ -582,6 +624,7 @@ def stand_in_node(section: str) -> str:
 
 def effective_sections(
     sections: List[Tuple[str, str, Dict[str, Any]]],
+    node_names: Optional[List[str]] = None,
 ) -> List[Tuple[str, str, Dict[str, Any]]]:
     """Return the values each node described by the files receives at runtime.
 
@@ -594,17 +637,26 @@ def effective_sections(
     when the node name is not pinned. Sections that name the same node, such
     as `/ns/ctrl` and `ns: {ctrl: ...}`, are validated once, reported at the
     first file that names it.
+
+    With `node_names`, exactly these nodes are returned instead, each with the
+    values of every section that applies to it, and with the file of the first
+    such section, or '' when none applies.
     """
-    nodes = [s for s in sections if not is_wildcard_node(s[1])] or sections
     targets: Dict[str, Tuple[str, str]] = {}
-    for path, name, _ in nodes:
-        targets.setdefault(stand_in_node(name), (path, name))
+    if node_names is None:
+        nodes = [s for s in sections if not is_wildcard_node(s[1])] or sections
+        for path, name, _ in nodes:
+            targets.setdefault(stand_in_node(name), (path, name))
+    else:
+        for name in node_names:
+            targets.setdefault(fully_qualified(name), ('', name))
     effective = []
     for node_fqn, (path, name) in targets.items():
         values: Dict[str, Any] = {}
-        for _, other, tree in sections:
+        for other_path, other, tree in sections:
             if section_matches(other, node_fqn):
                 values.update(flatten(tree))
+                path = path or other_path
         effective.append((path, name, values))
     return effective
 
@@ -622,13 +674,28 @@ def is_exempt(name: str, free_form: List[str]) -> bool:
 
 def validate_section(
     location: str,
-    generator,
+    generators: List[Any],
     values: Dict[str, Any],
     strict: bool,
 ) -> List[Diagnostic]:
-    """Validate one node's parameters against one definition."""
+    """Validate one node's parameters against the definitions it uses.
+
+    A parameter that several definitions declare is declared by the first
+    library, so its default applies. Every library then reads the node's value
+    as its own type and runs its own validators on it, so the value is checked
+    against every declaration. In strict mode a parameter is unknown if none of
+    the definitions declares it.
+    """
     diagnostics = []
-    parameters, free_form = declared_parameters(generator, values)
+    declarations: Dict[str, List[DeclaredParameter]] = {}
+    free_form: List[str] = []
+    for generator in generators:
+        first = {name: found[0] for name, found in declarations.items()}
+        declared, free = declared_parameters(generator, values, first)
+        for name, parameter in declared.items():
+            declarations.setdefault(name, []).append(parameter)
+        free_form += free
+    parameters = {name: found[0] for name, found in declarations.items()}
 
     for name, parameter in sorted(parameters.items()):
         where = join_name(location, name)
@@ -649,13 +716,16 @@ def validate_section(
             # the generator already did that at build time, and the rules in
             # check_type are about how rcl_yaml_param_parser reads text, which
             # does not apply to a compiled-in literal such as [] or 1.
-            problem = None
-            for severity, message in run_validations(
-                parameter, runtime_default(parameter)
-            ):
-                if severity == ERROR:
-                    problem = message
-                    break
+            default = runtime_default(parameter)
+            problem = next(
+                (
+                    message
+                    for declaration in declarations[name]
+                    for severity, message in run_validations(declaration, default)
+                    if severity == ERROR
+                ),
+                None,
+            )
             if problem is not None:
                 diagnostics.append(
                     Diagnostic(
@@ -677,14 +747,17 @@ def validate_section(
                 )
             continue
 
-        value = values[name]
-        problem = check_type(parameter, value)
-        if problem is not None:
-            diagnostics.append(Diagnostic(ERROR, where, problem))
-            continue
-        value = coerce_value(parameter, value)
-        for severity, message in run_validations(parameter, value):
-            diagnostics.append(Diagnostic(severity, where, message))
+        found = []
+        for declaration in declarations[name]:
+            problem = check_type(declaration, values[name])
+            if problem is not None:
+                found.append(Diagnostic(ERROR, where, problem))
+                break
+            value = coerce_value(declaration, values[name])
+            for severity, message in run_validations(declaration, value):
+                found.append(Diagnostic(severity, where, message))
+        # libraries that share a declaration report the same problem once
+        diagnostics.extend(d for i, d in enumerate(found) if d not in found[:i])
 
     if strict:
         unknown = [
@@ -824,19 +897,38 @@ def validate(
     definition_paths: List[str],
     config_paths: List[str],
     strict: bool = False,
+    nodes: Optional[List[str]] = None,
 ) -> List[Diagnostic]:
     """Validate the configs against the definitions whose namespace matches.
 
     The configs are merged in the given order, as the parameter files of one
     node are by rclcpp, so a later file overrides an earlier one. A file
     without any `ros__parameters` key holds no node name and is validated on
-    its own.
+    its own. With `nodes`, only these nodes are validated, with the values of
+    every section that applies to them, against the definition named after
+    them and every definition that names no node, together; a definition named
+    after another node is left to that one. A single definition is used for
+    them even if other sections match it by name. A given node that no section
+    applies to is an error, as it is most likely a misspelled name. An empty
+    `nodes` list is treated like None, so every node is validated.
     """
+    # every check below treats an empty selection like no selection
+    nodes = nodes or None
+    for name in nodes or []:
+        if '*' in name:
+            raise ConfigError(f'--node {name}: give a node name, not a wildcard')
     diagnostics = []
     configs = [(path, read_config(path)) for path in config_paths]
-    used = {node_name_of(name) for _, sections in configs for name in sections}
-    definitions, unused, duplicates = load_definitions(definition_paths, used)
     single_definition = len(definition_paths) == 1
+    if nodes:
+        selected = {node_name_of(name) for name in nodes}
+        node_definitions, unused = load_node_definitions(
+            definition_paths, configs, selected
+        )
+        duplicates = []
+    else:
+        used = {node_name_of(name) for _, sections in configs for name in sections}
+        definitions, unused, duplicates = load_definitions(definition_paths, used)
 
     for message in duplicates:
         diagnostics.append(Diagnostic(ERROR, 'parameter definitions', message))
@@ -848,8 +940,9 @@ def validate(
             Diagnostic(
                 WARNING,
                 'parameter definitions',
-                f'{len(unused)} matched no configuration section and were not '
-                f'checked: {shown}',
+                f'{len(unused)} '
+                f'{"belong to no selected node" if nodes else "matched no configuration section"}'
+                f' and were not checked: {shown}',
             )
         )
 
@@ -860,25 +953,53 @@ def validate(
         if '' not in sections
         for name, tree in sections.items()
     ]
-    nodes = plain + effective_sections(named)
-    matched = any(node_name_of(name) in definitions for _, name, _ in nodes)
-    for config_path, section_name, values in nodes:
+    targets = plain + effective_sections(named, nodes)
+    matched = not nodes and any(
+        node_name_of(name) in definitions for _, name, _ in targets
+    )
+    for config_path, section_name, values in targets:
+        if nodes and not config_path:
+            diagnostics.append(
+                Diagnostic(
+                    ERROR,
+                    section_name,
+                    'no configuration section applies to this node, check the '
+                    'node name',
+                )
+            )
         node_name = node_name_of(section_name)
-        if node_name in definitions:
-            generator = definitions[node_name]
+        if nodes and single_definition:
+            generators = [generator for _, generator in node_definitions]
+        elif nodes:
+            # the definitions named after the node and those naming no selected
+            # node; a plain file names no node, so none applies to it
+            generators = [
+                generator
+                for namespace, generator in node_definitions
+                if section_name
+                and (namespace == node_name or namespace not in selected)
+            ]
+        elif node_name in definitions:
+            generators = [definitions[node_name]]
         # a plain file names no node, so a match in another file says nothing about it
         elif single_definition and (section_name == '' or not matched):
-            generator = next(iter(definitions.values()))
+            generators = [next(iter(definitions.values()))]
         else:
+            generators = []
+        if not generators:
             diagnostics.append(
                 Diagnostic(
                     WARNING,
                     f'{config_path}:{section_name}',
-                    'no parameter definition has this namespace, not checked',
+                    (
+                        'no parameter definition applies to this node, not checked'
+                        if nodes
+                        else 'no parameter definition has this namespace, not checked'
+                    ),
                 )
             )
             continue
-        diagnostics.extend(validate_section(section_name, generator, values, strict))
+        diagnostics.extend(validate_section(section_name, generators, values, strict))
     return diagnostics
 
 
@@ -906,6 +1027,16 @@ def parse_args(argv=None):
         'overrides an earlier one',
     )
     parser.add_argument(
+        '--node',
+        action='append',
+        metavar='NAME',
+        help='validate only this node, as `my_node` or `/ns/my_node`, with '
+        'the values of every section that applies to it, including wildcard '
+        'sections; may be given more than once. Each node is checked against '
+        'every definition named after it or naming no node, together. Without '
+        'it, every node a section names is validated',
+    )
+    parser.add_argument(
         '--strict',
         action='store_true',
         help='also report parameters that no definition declares and '
@@ -917,7 +1048,9 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     try:
-        diagnostics = validate(args.param_definition, args.config, args.strict)
+        diagnostics = validate(
+            args.param_definition, args.config, args.strict, args.node
+        )
     except ConfigError as error:
         print(f'{ERROR}: {error}', file=sys.stderr)
         return 1
