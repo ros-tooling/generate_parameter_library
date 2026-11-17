@@ -28,6 +28,8 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import json
+
 
 def valid_string_cpp(description):
     """
@@ -54,15 +56,21 @@ def valid_string_cpp(description):
 
 def valid_string_python(description):
     """
-    Filter a string to make it a valid Python string literal.
+    Escape a string for use between the double quotes of a Python string literal.
+
+    Backslashes, quotes and control characters are escaped, and each newline is
+    followed by an indent, as valid_string_cpp does.
 
     Args:
       description (str): The input string to be filtered.
 
     Returns:
-      str: The filtered string that is a valid Python string.
+      str: The escaped text without the surrounding quotes, or '' when the
+      input is empty.
     """
     if description:
-        return description.replace('\n', '\\n    ').replace('"', '\\"')
+        # The templates add the quotes; JSON escaping without them is valid
+        # inside a Python string literal.
+        return json.dumps(description.replace('\n', '\n    '), ensure_ascii=False)[1:-1]
     else:
         return ''
