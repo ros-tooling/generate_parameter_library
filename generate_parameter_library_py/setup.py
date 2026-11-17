@@ -35,7 +35,7 @@ package_name = 'generate_parameter_library_py'
 
 setup(
     name=package_name,
-    version='1.3.1',
+    version='1.4.0',
     packages=find_packages(),
     data_files=[
         ('share/' + package_name, ['package.xml']),

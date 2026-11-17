@@ -2,8 +2,8 @@
 Changelog for package generate_parameter_library_py
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+1.4.0 (2026-11-17)
+------------------
 * Escape text in generated C++ and Python code (`#405 <https://github.com/ros-tooling/generate_parameter_library/issues/405>`_)
 * Install parameter definitions to share/<package>/parameter_definitions (`#419 <https://github.com/ros-tooling/generate_parameter_library/issues/419>`_)
 * Report wrong default_value types as definition errors (`#408 <https://github.com/ros-tooling/generate_parameter_library/issues/408>`_)

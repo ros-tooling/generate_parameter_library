@@ -36,7 +36,7 @@ package_name = 'generate_parameter_module_example'
 
 setup(
     name=package_name,
-    version='1.3.1',
+    version='1.4.0',
     packages=[package_name],
     cmdclass=parameter_cmdclass(
         'admittance_parameters',

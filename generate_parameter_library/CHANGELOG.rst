@@ -2,8 +2,8 @@
 Changelog for package generate_parameter_library
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+1.4.0 (2026-11-17)
+------------------
 * Install parameter definitions to share/<package>/parameter_definitions (`#419 <https://github.com/ros-tooling/generate_parameter_library/issues/419>`_)
 * Remove dead code (`#412 <https://github.com/ros-tooling/generate_parameter_library/issues/412>`_)
 * Contributors: Christoph Fröhlich
