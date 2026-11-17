@@ -41,7 +41,9 @@ jobs:
         run: |
           generate_parameter_library_validate \
             --param-definition example/src/parameters.yaml \
-            --config example/config/implementation.yaml \
+            --config example/config/implementation.yaml
+          generate_parameter_library_validate \
+            --param-definition example/src/parameters.yaml \
             --config example_external/config/implementation.yaml
           generate_parameter_library_validate \
             --param-definition example_python/generate_parameter_module_example/parameters.yaml \
@@ -53,11 +55,13 @@ jobs:
         run: |
           ! generate_parameter_library_validate \
             --param-definition example/src/parameters.yaml \
-            --config example/config/missing_required.yaml \
-            --config example_external/config/missing_required.yaml
+            --config example/config/missing_required.yaml || exit 1
+          ! generate_parameter_library_validate \
+            --param-definition example/src/parameters.yaml \
+            --config example_external/config/missing_required.yaml || exit 1
           ! generate_parameter_library_validate \
             --param-definition example_python/generate_parameter_module_example/parameters.yaml \
-            --config example_python/config/missing_required.yaml
+            --config example_python/config/missing_required.yaml || exit 1
           ! generate_parameter_library_validate \
             --param-definition example_cmake_python/cmake_generate_parameter_module_example/parameters.yaml \
-            --config example_cmake_python/config/missing_required.yaml
+            --config example_cmake_python/config/missing_required.yaml || exit 1
