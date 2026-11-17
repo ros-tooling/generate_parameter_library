@@ -700,6 +700,9 @@ behave unexpectedly:
 
 * a value whose type does not match the declared type, including an integer
   written where a `double` is declared, which ROS 2 does not convert
+* a nested sequence such as `[["a", "b"]]`, which ROS 2 parameters do not
+  support: `rcl_yaml_param_parser` rejects the whole file or loads a different
+  value, for example `["x", ["a"]]` as `["a"]`
 * a quoted scalar where a number or a bool is declared, which ROS 2 keeps a
   string, or a plain `y` or `on` where a string is declared, which ROS 2
   reads as a bool

@@ -304,6 +304,14 @@ def check_type(parameter: DeclaredParameter, value: Any) -> Optional[str]:
             'an empty sequence gives the node no value at all; ROS 2 reads it '
             'as PARAMETER_NOT_SET rather than as an empty array'
         )
+    for index, element in enumerate(value):
+        if isinstance(element, list):
+            # Checked first: the element count is meaningless for such a value.
+            return (
+                f'element {index} of the array is a nested sequence, which ROS 2 '
+                f'parameters do not support; rcl_yaml_param_parser rejects the '
+                f'whole file or loads a different value, e.g. ["x", ["a"]] as ["a"]'
+            )
     if size is not None and len(value) > size:
         return f'array has {len(value)} elements, more than the fixed size of {size}'
     for index, element in enumerate(value):
