@@ -83,6 +83,13 @@ macro(generate_parameter_library LIB_NAME YAML_FILE)
     tl::expected
   )
   install(DIRECTORY ${LIB_INCLUDE_DIR} DESTINATION include)
+  # Install the definition, so that tools such as generate_parameter_library_validate
+  # find it in binary and underlay installs, where the source tree is not available.
+  # The real path, as install(FILES) would install a symlinked definition as a dangling link
+  get_filename_component(PARAM_DEFINITION_FILE ${YAML_FILE_PATH} REALPATH)
+  install(FILES ${PARAM_DEFINITION_FILE}
+    DESTINATION share/${PROJECT_NAME}/parameter_definitions
+    RENAME ${LIB_NAME}.yaml)
   ament_export_dependencies(
     fmt rclcpp rclcpp_lifecycle rsl tcb_span
     tl-expected
@@ -129,6 +136,11 @@ function(generate_parameter_module LIB_NAME YAML_FILE)
 
   # Install the generated module into the Python site-packages dir
   install(FILES ${PARAM_HEADER_FILE} DESTINATION ${CMAKE_INSTALL_PREFIX}/${python_install_dir}/${PROJECT_NAME})
+  # Install the definition, see generate_parameter_library()
+  get_filename_component(PARAM_DEFINITION_FILE ${YAML_FILE} REALPATH)
+  install(FILES ${PARAM_DEFINITION_FILE}
+    DESTINATION share/${PROJECT_NAME}/parameter_definitions
+    RENAME ${LIB_NAME}.yaml)
 endfunction()
 
 # create custom test function to pass yaml file into test main

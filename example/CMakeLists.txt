@@ -66,6 +66,9 @@ if(BUILD_TESTING)
   add_launch_test(test/launch.test.py
     TIMEOUT 50
   )
+
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_installed_definition test/test_installed_definition.py)
 endif()
 
 install(

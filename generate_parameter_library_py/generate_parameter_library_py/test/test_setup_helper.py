@@ -398,6 +398,200 @@ def test_pip_editable_generates_into_source(tmp_path):
     assert read(os.path.join(root, 'probe', '__init__.py')) == 'VALUE = 1\n'
 
 
+def installed_definition(prefix):
+    return os.path.join(
+        prefix, 'share', 'probe', 'parameter_definitions', 'probe_parameters.yaml'
+    )
+
+
+def install(root, tmp_path):
+    """Run `setup.py install` the way colcon does without --symlink-install."""
+    prefix = os.path.join(tmp_path, 'install')
+    run_setup(
+        root,
+        'build',
+        '--build-base',
+        os.path.join(tmp_path, 'build'),
+        'install',
+        '--prefix',
+        prefix,
+        # data files to <prefix>/share as with colcon, whatever the platform's scheme
+        '--install-data',
+        prefix,
+        '--record',
+        os.path.join(tmp_path, 'install.log'),
+        '--single-version-externally-managed',
+    )
+    return prefix
+
+
+def test_install_installs_definition(tmp_path):
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    path = installed_definition(install(root, str(tmp_path)))
+
+    assert not os.path.islink(path)
+    assert read(path) == PARAMETERS_YAML
+
+
+def test_install_skip_build_in_a_second_process_installs_definition(tmp_path):
+    """Packaging tools may build and install in separate setup.py runs."""
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    prefix = os.path.join(str(tmp_path), 'install')
+    # the default build base, as install --skip-build cannot be told another one
+    run_setup(root, 'build')
+    run_setup(
+        root,
+        'install',
+        '--skip-build',
+        '--prefix',
+        prefix,
+        '--install-data',
+        prefix,
+        '--record',
+        os.path.join(str(tmp_path), 'install.log'),
+        '--single-version-externally-managed',
+    )
+    path = installed_definition(prefix)
+
+    assert read(path) == PARAMETERS_YAML
+
+
+def test_install_registers_no_absolute_path_with_include_package_data(tmp_path):
+    """setuptools without the build dir filter rejects absolute SOURCES.txt entries."""
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    with open(os.path.join(root, 'setup.py')) as f:
+        setup_py = f.read()
+    with open(os.path.join(root, 'setup.py'), 'w') as f:
+        f.write(
+            setup_py.replace(
+                "packages=['probe'],", "packages=['probe'], include_package_data=True,"
+            )
+        )
+    prefix = os.path.join(str(tmp_path), 'install')
+    # the default, relative build base: egg_info only prunes the build base by
+    # its given spelling, so the absolute staged path would stay in SOURCES.txt
+    run_setup(
+        root,
+        'install',
+        '--prefix',
+        prefix,
+        '--install-data',
+        prefix,
+        '--record',
+        os.path.join(str(tmp_path), 'install.log'),
+        '--single-version-externally-managed',
+    )
+
+    assert read(installed_definition(prefix)) == PARAMETERS_YAML
+    sources = read(os.path.join(root, 'probe.egg-info', 'SOURCES.txt')).splitlines()
+    assert [s for s in sources if os.path.isabs(s)] == []
+
+
+def test_install_installs_symlinked_definition_as_file(tmp_path):
+    root = write_package(str(tmp_path / 'src'), 'config/parameters.yaml')
+    os.symlink(
+        os.path.join('..', 'config', 'parameters.yaml'),
+        os.path.join(root, 'probe', 'parameters.yaml'),
+    )
+    with open(os.path.join(root, 'setup.py')) as f:
+        setup_py = f.read()
+    with open(os.path.join(root, 'setup.py'), 'w') as f:
+        f.write(setup_py.replace('config/parameters.yaml', 'probe/parameters.yaml'))
+    path = installed_definition(install(root, str(tmp_path)))
+
+    assert not os.path.islink(path)
+    assert read(path) == PARAMETERS_YAML
+
+
+def test_develop_links_definition_to_source(tmp_path, monkeypatch):
+    # colcon --symlink-install runs `setup.py develop ... symlink_data`, with
+    # colcon's distutils commands on PYTHONPATH
+    colcon_python = pytest.importorskip('colcon_core.task.python')
+    commands = os.path.join(
+        os.path.dirname(colcon_python.__file__), 'colcon_distutils_commands'
+    )
+    monkeypatch.setenv(
+        'PYTHONPATH',
+        os.pathsep.join([commands] + [p for p in [os.environ.get('PYTHONPATH')] if p]),
+    )
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    prefix = str(tmp_path / 'install')
+    run_setup(
+        root,
+        'develop',
+        '--prefix',
+        prefix,
+        '--no-deps',
+        'symlink_data',
+        '--install-dir',
+        prefix,
+    )
+
+    assert os.path.realpath(installed_definition(prefix)) == os.path.realpath(
+        os.path.join(root, 'probe', 'parameters.yaml')
+    )
+
+
+def definitions(prefix):
+    path = os.path.join(prefix, 'share', 'probe', 'parameter_definitions')
+    return {name: read(os.path.join(path, name)) for name in sorted(os.listdir(path))}
+
+
+def test_install_multiple_modules_installs_every_definition(tmp_path):
+    root = write_multi_module_package(str(tmp_path / 'src'))
+    prefix = install(root, str(tmp_path))
+
+    assert definitions(prefix) == {
+        'extra_parameters.yaml': PARAMETERS_YAML.replace('probe', 'extra'),
+        'probe_parameters.yaml': PARAMETERS_YAML,
+    }
+
+
+def test_install_qualifies_module_names_shared_by_packages(tmp_path):
+    # the same module name in two packages must not install one definition only
+    root = write_multi_module_package(str(tmp_path / 'src'))
+    setup_py = os.path.join(root, 'setup.py')
+    content = read(setup_py).replace("'extra_parameters'", "'probe_parameters'")
+    with open(setup_py, 'w') as f:
+        f.write(content)
+    prefix = install(root, str(tmp_path))
+
+    assert definitions(prefix) == {
+        'probe.probe_parameters.yaml': PARAMETERS_YAML,
+        'probe_extra.probe_parameters.yaml': PARAMETERS_YAML.replace('probe', 'extra'),
+    }
+
+
+def test_develop_copies_definition_without_symlinks(tmp_path, monkeypatch):
+    # e.g. Windows without the symlink privilege
+    site = tmp_path / 'site'
+    site.mkdir()
+    (site / 'sitecustomize.py').write_text(
+        'import os\n\n\n'
+        'def symlink(*args, **kwargs):\n'
+        "    raise OSError('symbolic links are not available')\n\n\n"
+        'os.symlink = symlink\n'
+    )
+    monkeypatch.setenv(
+        'PYTHONPATH',
+        os.pathsep.join([str(site)] + [p for p in [os.environ.get('PYTHONPATH')] if p]),
+    )
+    root = write_package(str(tmp_path / 'src'), 'probe/parameters.yaml')
+    prefix = str(tmp_path / 'install')
+    run_setup(
+        root,
+        'develop',
+        '--prefix',
+        prefix,
+        '--no-deps',
+        'install_data',
+        '--install-dir',
+        prefix,
+    )
+
+    assert read(installed_definition(prefix)) == PARAMETERS_YAML
+
+
 LEGACY_SETUP_PY = """import sys
 
 from setuptools import setup
@@ -419,6 +613,10 @@ def test_legacy_generate_parameter_module_still_generates(tmp_path):
 
     # The legacy helper writes next to the colcon build base.
     assert default_frame(str(tmp_path / 'build' / 'probe')) == 'probe_frame'
+    # and installs the definition into the colcon install base
+    assert read(installed_definition(str(tmp_path / 'install' / 'probe'))) == (
+        PARAMETERS_YAML
+    )
 
 
 def test_modules_rejects_top_level_arguments():

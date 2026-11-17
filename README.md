@@ -756,6 +756,20 @@ can gate a pipeline:
       --strict
 ```
 
+Packages install each definition as
+`share/<package>/parameter_definitions/<name>.yaml`, so a configuration can also
+be checked against a package installed from binaries or in an underlay, without
+its source. `<name>` is the library name given to `generate_parameter_library()`
+or `generate_parameter_module()` in CMake, or the module name given to
+`parameter_cmdclass()` or `generate_parameter_module()` in `setup.py`
+(`<package>.<module>` if modules in several Python packages share the name):
+
+```bash
+generate_parameter_library_validate \
+  --param-definition "$(ros2 pkg prefix joint_state_broadcaster)/share/joint_state_broadcaster/parameter_definitions/joint_state_broadcaster_parameters.yaml" \
+  --config config/controllers.yaml
+```
+
 Custom validator functions are C++ and cannot run outside a build, so they are
 reported as skipped rather than silently ignored. `read_only` describes
 behaviour at runtime and is not checked.
