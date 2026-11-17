@@ -1,4 +1,17 @@
 admittance_controller:
+  # This definition is shared by the C++ and both Python examples.
+  max_angle:
+    type: double
+    default_value: "${pi/2}"
+    description: "Maximum angle in radians, with expressions evaluated during generation"
+    validation:
+      bounds<>: ["${-pi}", "${pi}"]
+  angle_offsets:
+    type: double_array
+    default_value: ["${-pi/2}", 0.0, "${pi/2}"]
+    description: "Angle offsets in radians, mixing expressions and literal values"
+    validation:
+      element_bounds<>: ["${-pi}", "${pi}"]
   scientific_notation_num:
     type: double
     default_value: 0.00000000001
@@ -66,7 +79,7 @@ admittance_controller:
   pid:
     rate:
       type: double
-      default_value: 0.005
+      default_value: "${1.0 / 200.0}"
       description: "update loop period in seconds"
 
     __map_joints:
