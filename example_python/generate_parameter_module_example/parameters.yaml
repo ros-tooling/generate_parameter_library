@@ -102,6 +102,10 @@ admittance_controller:
         type: double
         default_value: 1.0
         description: "A value in the nested map with sibling keys"
+      weight:
+        type: double
+        default_value: 1.0
+        description: "A second value, so that one can be restored while the other is set"
 
   nested_map_struct_entries:
     type: string_array

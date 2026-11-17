@@ -482,6 +482,117 @@ class TestParamsConsistency(unittest.TestCase):
         self.assertAlmostEqual(lib_value, new_value)
         self.assertAlmostEqual(lib_value, ros_value)
 
+    def test_refresh_without_key_changes_keeps_params(self):
+        before = self.listener.get_params()
+        self.listener.refresh_dynamic_parameters()
+        self.assertFalse(self.listener.is_old(before))
+
+    def test_refresh_declares_added_mapped_parameters(self):
+        joints = list(self.params.joints) + ['joint_new']
+        self.node.set_parameters([Parameter('joints', value=joints)])
+        self.listener.refresh_dynamic_parameters()
+
+        self.assertTrue(self.node.has_parameter('pid.joint_new.p'))
+        updated_params = self.listener.get_params()
+        self.assertAlmostEqual(
+            updated_params.pid.get_entry('joint_new').p,
+            self.node.get_parameter('pid.joint_new.p').value,
+        )
+
+    def test_refresh_removes_dropped_mapped_entries(self):
+        removed = self.params.joints[-1]
+        joints = list(self.params.joints[:-1])
+        kept = joints[0]
+        dof = self.params.dof_names[0]
+
+        self.node.set_parameters([Parameter('joints', value=joints)])
+        self.listener.refresh_dynamic_parameters()
+
+        # parameters stay declared, like in C++ where rclcpp cannot undeclare them
+        self.assertTrue(self.node.has_parameter(f'pid.{removed}.p'))
+        updated_params = self.listener.get_params()
+        for joint in joints:
+            updated_params.pid.get_entry(joint)
+        with self.assertRaises(AttributeError):
+            updated_params.pid.get_entry(removed)
+        with self.assertRaises(AttributeError):
+            updated_params.get_entry(removed)
+        with self.assertRaises(AttributeError):
+            updated_params.nested_dynamic.get_entry(removed)
+        with self.assertRaises(AttributeError):
+            updated_params.nested_dynamic.get_entry(kept).get_entry(dof).get_entry(
+                removed
+            )
+
+    def test_refresh_restores_mapped_entries_added_again(self):
+        all_joints = list(self.params.joints)
+        added_again = all_joints[-1]
+        new_value = 7.0
+        self.node.set_parameters([Parameter('joints', value=all_joints[:-1])])
+        self.listener.refresh_dynamic_parameters()
+        self.node.set_parameters([Parameter(f'pid.{added_again}.p', value=new_value)])
+
+        self.node.set_parameters([Parameter('joints', value=all_joints)])
+        self.listener.refresh_dynamic_parameters()
+
+        updated_params = self.listener.get_params()
+        self.assertAlmostEqual(updated_params.pid.get_entry(added_again).p, new_value)
+
+    def test_refresh_restores_values_of_the_only_map_of_a_key_list(self):
+        # nested_map.entries keys no other map, so no other entry signals the change
+        self.node.set_parameters([Parameter('nested_map.entry1.weight', value=8.0)])
+        self.node.set_parameters([Parameter('nested_map.entries', value=['entry2'])])
+        self.listener.refresh_dynamic_parameters()
+
+        # setting value recreates the entry in update(), with the default weight
+        self.node.set_parameters(
+            [Parameter('nested_map.entries', value=['entry1', 'entry2'])]
+        )
+        self.node.set_parameters([Parameter('nested_map.entry1.value', value=5.0)])
+        self.listener.refresh_dynamic_parameters()
+
+        entry = self.listener.get_params().nested_map.get_entry('entry1')
+        self.assertAlmostEqual(entry.value, 5.0)
+        self.assertAlmostEqual(entry.weight, 8.0)
+
+    def test_refresh_erases_keys_whose_child_map_is_empty(self):
+        removed = self.params.joints[-1]
+        joints = list(self.params.joints[:-1])
+        self.node.set_parameters(
+            [Parameter('dof_names', Parameter.Type.STRING_ARRAY, [])]
+        )
+        self.listener.refresh_dynamic_parameters()
+        self.node.set_parameters([Parameter('joints', value=joints)])
+        self.listener.refresh_dynamic_parameters()
+
+        updated_params = self.listener.get_params()
+        for struct in (
+            updated_params.pid,
+            updated_params,
+            updated_params.nested_dynamic,
+        ):
+            with self.assertRaises(AttributeError):
+                struct.get_entry(removed)
+
+    def test_refresh_adds_keys_whose_child_map_is_empty(self):
+        all_joints = list(self.params.joints)
+        joint = all_joints[-1]
+        self.node.set_parameters(
+            [Parameter('dof_names', Parameter.Type.STRING_ARRAY, [])]
+        )
+        self.node.set_parameters([Parameter('joints', value=all_joints[:-1])])
+        self.listener.refresh_dynamic_parameters()
+        self.node.set_parameters([Parameter('joints', value=all_joints)])
+        self.listener.refresh_dynamic_parameters()
+
+        updated_params = self.listener.get_params()
+        for struct in (
+            updated_params.pid,
+            updated_params,
+            updated_params.nested_dynamic,
+        ):
+            struct.get_entry(joint)
+
     def test_update_map_gains_dof_k(self):
         dof = self.params.dof_names[0]
         param_name = f'gains.{dof}.k'

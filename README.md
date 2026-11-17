@@ -444,6 +444,35 @@ params.gain.joints_map.at("joint1").interfaces_map.at("position").value
 params.gain.get_entry("joint1").get_entry("position").value
 ```
 
+#### Changing the keys at runtime
+
+When a key array such as `joints` changes at runtime, call `refresh_dynamic_parameters()` on the `ParamListener` to update the maps:
+
+**C++**
+
+```c++
+param_listener->refresh_dynamic_parameters();
+for (const auto & [joint, gains] : param_listener->get_params().pid.joints_map) {
+  // only the joints currently in `joints`
+}
+```
+
+**Python**
+
+```python
+param_listener.refresh_dynamic_parameters()
+params = param_listener.get_params()
+for joint in params.joints:
+    gains = params.pid.get_entry(joint)  # an entry exists for every joint in `joints`
+```
+
+- Keys that were added get their parameters declared, and their entries are added to the maps with the values on the node.
+  Until then, a key that is in its key array but has no entry yet is not in the maps, and setting one of its parameters only reaches the node.
+- Keys that were removed are erased from the maps.
+  Their parameters stay declared on the node, because rclcpp cannot undeclare statically typed parameters; the Python library behaves the same.
+  If a key is added again, its entry is restored with the current parameter values.
+- Do not call `refresh_dynamic_parameters()` from a parameter callback such as the user callback: there the node has not stored the new values yet, and rclcpp rejects declaring parameters.
+
 #### Key array scope resolution
 
 The `key` used by a `__map_<key>` segment does not need to be defined at the root namespace level. It can also be a **sibling** within the same struct, or defined anywhere in a parent scope.
