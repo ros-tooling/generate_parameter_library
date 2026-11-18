@@ -25,3 +25,5 @@ jobs:
       ros_distro: humble
       # downstream_depth is not set on pull_request event
       prerelease_downstream_depth: ${{ github.event_name == 'pull_request' && '0' || inputs.downstream_depth }}
+      # run on every PR, not only on PRs labeled check-prerelease
+      run_on_pull_request: true
