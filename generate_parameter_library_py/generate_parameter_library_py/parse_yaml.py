@@ -274,6 +274,8 @@ class CodeGenVariableBase:
         self.default_value = default_value
         self.name = name
         self.param_name = param_name
+        # Size of a fixed size type, set by CodeGenFixedVariable.process_type.
+        self.fixed_size = None
         self.defined_type, template = self.process_type(defined_type)
         self.array_type = array_type(self.defined_type)
 
@@ -331,6 +333,7 @@ class CodeGenVariable(CodeGenVariableBase):
 class CodeGenFixedVariable(CodeGenVariableBase):
     def process_type(self, defined_type):
         size = fixed_type_size(defined_type)
+        self.fixed_size = size
         tmp = defined_type.split('_')
         yaml_base_type = tmp[0]
         func = self.conversion.defined_type_to_lang_type[yaml_base_type]
@@ -869,11 +872,15 @@ class GenerateCode:
     def parse(self, yaml_file, validate_header):
         with open(yaml_file) as f:
             try:
-                docs = yaml.load_all(f, Loader=yaml.Loader)
+                # SafeLoader: a definition is plain data, and a python/* tag in
+                # it must not run code during a build or a validation.
+                docs = yaml.load_all(f, Loader=yaml.SafeLoader)
                 doc = list(docs)[0]
             except ParserError as e:
                 raise compile_error(str(e))
             except ScannerError as e:
+                raise compile_error(str(e))
+            except yaml.YAMLError as e:
                 raise compile_error(str(e))
 
             if len(doc) != 1:
