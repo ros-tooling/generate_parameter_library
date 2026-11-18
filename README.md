@@ -647,11 +647,6 @@ generate_parameter_library_validate \
   --config config/robot.yaml
 ```
 
-Pass `--param-definition` more than once to check several definitions in one
-run. A configuration section is matched to the definition whose root element
-has the same name; when exactly one definition is given and no section matches
-it, it is used for every section.
-
 Pass `--config` more than once to check configuration files that are loaded
 together, as `parameters=[common.yaml, robot.yaml]` in a launch file or
 repeated `--params-file` arguments do. The files are merged in the given order,
@@ -667,6 +662,38 @@ several nodes. As at runtime, a node receives the values of every section that
 matches its name, in the order of the files and then of the sections in a file,
 so a later section overrides an earlier one. A section whose node name is a
 wildcard is only checked on its own when no file names a node.
+
+Pass `--param-definition` more than once to check several definitions in one
+run. Without `--node`, a configuration section is matched to the definition
+whose root element has the same name; when exactly one definition is given and
+no section matches it, it is used for every section.
+
+Pass `--node` with the name of the node that loads the files, as `my_node` or
+`/ns/my_node`, to check only that node; it may be given more than once. The
+node is checked with the values of every section that applies to it, including
+wildcard sections, even if no section names it, and sections of other nodes in
+the same files are left out. A node that no section applies to is an error, as
+the name is most likely misspelled. This fits files shared by several nodes,
+such as a ros2_control configuration with several controllers.
+
+With `--node`, the node is checked against the definition named after it and
+every definition whose root element names no node, together, as for a node that
+uses several parameter libraries, such as a controller and its plugin. In
+`--strict` mode a parameter is unknown only if none of them declares it. A
+parameter that several of them declare takes the default of the first given
+definition, as the node keeps the first declaration, and its value has to pass
+the type and validators of every one, as every library reads it back. A
+definition named after another node belongs to that node and is only read if
+that node is given too, and a single definition is used for every given node.
+
+```bash
+generate_parameter_library_validate \
+  --param-definition src/joint_trajectory_controller_parameters.yaml \
+  --param-definition src/pid_trajectory_plugin_parameters.yaml \
+  --config config/controllers_common.yaml \
+  --config config/arm_controller.yaml \
+  --node arm_controller
+```
 
 Without further options the tool reports what makes a node fail to start or
 behave unexpectedly:
@@ -692,7 +719,7 @@ behave unexpectedly:
   configuration does not set
 * a parameter the configuration omits whose `default_value` fails the same
   checks, because the node validates the effective value
-* two definitions that declare the same root element
+* without `--node`, two definitions that declare the same root element
 
 Scalars are read the way `rcl_yaml_param_parser` reads them rather than the way
 PyYAML does, so `1e5` counts as a `double` while a quoted `"2.0"` stays a
