@@ -26,10 +26,26 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import math
+
 
 def no_args_validator(param):
     return ''
 
 
-def validate_double_array_custom_func(param, arg1, arg2):
+def validate_damping_ratio(param, lower_bound, upper_bound):
+    if len(param.value) != 6:
+        return f"Parameter '{param.name}' must contain six damping ratio values"
+
+    for value in param.value:
+        if not math.isfinite(value) or value <= 0.0:
+            return (
+                f"Parameter '{param.name}' must contain finite positive damping ratios"
+            )
+        if value < lower_bound or value > upper_bound:
+            return (
+                f"Value {value} in parameter '{param.name}' must be within "
+                f"[{lower_bound}, {upper_bound}]"
+            )
+
     return ''
