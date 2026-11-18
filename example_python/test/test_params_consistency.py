@@ -118,6 +118,12 @@ class TestParamsConsistency(unittest.TestCase):
             list(self.node.get_parameter('fixed_array').value),
         )
 
+    def test_fixed_bool_array(self):
+        self.assertEqual(
+            list(self.params.fixed_bool_array),
+            list(self.node.get_parameter('fixed_bool_array').value),
+        )
+
     def test_enable_parameter_update_without_reactivation(self):
         self.assertEqual(
             self.params.enable_parameter_update_without_reactivation,
@@ -418,6 +424,22 @@ class TestParamsConsistency(unittest.TestCase):
             list(updated_params.fixed_array),
             list(self.node.get_parameter('fixed_array').value),
         )
+
+    def test_update_bool_array_fixed_array(self):
+        new_value = [False, True]
+        self.node.set_parameters([Parameter('fixed_bool_array', value=new_value)])
+        updated_params = self.listener.get_params()
+        self.assertEqual(list(updated_params.fixed_bool_array), new_value)
+        self.assertEqual(
+            list(updated_params.fixed_bool_array),
+            list(self.node.get_parameter('fixed_bool_array').value),
+        )
+
+    def test_reject_bool_array_above_fixed_size(self):
+        result = self.node.set_parameters(
+            [Parameter('fixed_bool_array', value=[True] * 6)]
+        )
+        self.assertFalse(result[0].successful)
 
     def test_update_double_array_admittance_mass(self):
         new_value = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]

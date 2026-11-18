@@ -123,6 +123,10 @@ admittance_controller:
     type: double_array_fixed_10
     default_value: [1.0, 2.3, 4.0 ,5.4, 3.3]
     description: "test code generation for fixed sized array"
+  fixed_bool_array:
+    type: bool_array_fixed_5
+    default_value: [true, false, true]
+    description: "test code generation for fixed sized bool array"
   fixed_string_no_default:
     type: string_fixed_25
     description: "test code generation for fixed sized string with no default"
