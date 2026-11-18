@@ -121,8 +121,8 @@ setup(
     zip_safe=False,
     author='Paul Gesel',
     author_email='paul.gesel@picknik.ai',
-    url='https://github.com/PickNikRobotics/generate_parameter_library',
-    download_url='https://github.com/PickNikRobotics/generate_parameter_library/releases',
+    url='https://github.com/ros-tooling/generate_parameter_library',
+    download_url='https://github.com/ros-tooling/generate_parameter_library/releases',
     keywords=['ROS'],
     classifiers=[
         'Intended Audience :: Developers',
