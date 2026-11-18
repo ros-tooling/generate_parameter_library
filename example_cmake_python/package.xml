@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>cmake_generate_parameter_module_example</name>
-  <version>1.3.0</version>
+  <version>1.4.0</version>
   <description>Example usage of generate_parameter_library for a python module with cmake.</description>
   <maintainer email="bence.magyar.robotics@gmail.com">bmagyar</maintainer>
   <maintainer email="christoph.froehlich@ait.ac.at">christophfroehlich</maintainer>
@@ -16,6 +16,10 @@
   <depend>rclpy</depend>
 
   <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_index_python</test_depend>
+  <test_depend>generate_parameter_library_py</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

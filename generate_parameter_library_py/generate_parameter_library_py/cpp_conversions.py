@@ -28,13 +28,9 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import json
 from typing import List, Union
-from jinja2 import Template
 from typeguard import typechecked
-import os
-import yaml
-from yaml.parser import ParserError
-from yaml.scanner import ScannerError
 
 
 class CPPConversions:
@@ -174,7 +170,8 @@ class CPPConversions:
     def str_to_str(self, s: Union[None, str]):
         if s is None:
             return ''
-        return f'"{s}"'
+        # JSON escaping is also valid C++ and Python string literal syntax.
+        return json.dumps(s, ensure_ascii=False)
 
     @typechecked
     def bool_array_to_str(self, values: Union[None, list]):

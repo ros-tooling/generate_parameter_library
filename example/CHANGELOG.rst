@@ -2,6 +2,17 @@
 Changelog for package generate_parameter_library_example
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.4.0 (2026-11-17)
+------------------
+* Install parameter definitions to share/<package>/parameter_definitions (`#419 <https://github.com/ros-tooling/generate_parameter_library/issues/419>`_)
+* Contributors: Christoph Fröhlich
+
+1.3.1 (2026-10-05)
+------------------
+* fix that if no parameter is updated, the user callback is not called (`#383 <https://github.com/PickNikRobotics/generate_parameter_library/issues/383>`_)
+* Add <fmt/format.h> for fmt 11+ compatibility (`#379 <https://github.com/PickNikRobotics/generate_parameter_library/issues/379>`_)
+* Contributors: Dhruv Patel, Fabian Hirmann
+
 1.3.0 (2026-07-24)
 ------------------
 * Use a shared symlinked parameter file in all examples (`#361 <https://github.com/PickNikRobotics/generate_parameter_library/issues/361>`_)

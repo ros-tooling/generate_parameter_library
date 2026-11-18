@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>generate_parameter_library</name>
-  <version>1.3.0</version>
+  <version>1.4.0</version>
   <description>CMake to generate ROS parameter library.</description>
   <maintainer email="bence.magyar.robotics@gmail.com">bmagyar</maintainer>
   <maintainer email="christoph.froehlich@ait.ac.at">christophfroehlich</maintainer>

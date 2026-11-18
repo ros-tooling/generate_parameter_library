@@ -35,7 +35,7 @@ package_name = 'generate_parameter_library_py'
 
 setup(
     name=package_name,
-    version='1.3.0',
+    version='1.4.0',
     packages=find_packages(),
     data_files=[
         ('share/' + package_name, ['package.xml']),
@@ -121,8 +121,8 @@ setup(
     zip_safe=False,
     author='Paul Gesel',
     author_email='paul.gesel@picknik.ai',
-    url='https://github.com/PickNikRobotics/generate_parameter_library',
-    download_url='https://github.com/PickNikRobotics/generate_parameter_library/releases',
+    url='https://github.com/ros-tooling/generate_parameter_library',
+    download_url='https://github.com/ros-tooling/generate_parameter_library/releases',
     keywords=['ROS'],
     classifiers=[
         'Intended Audience :: Developers',
@@ -141,6 +141,7 @@ setup(
             'generate_parameter_library_cpp = generate_parameter_library_py.generate_cpp_header:main',
             'generate_parameter_library_python = generate_parameter_library_py.generate_python_module:main',
             'generate_parameter_library_markdown = generate_parameter_library_py.generate_markdown:main',
+            'generate_parameter_library_validate = generate_parameter_library_py.validate_config:main',
         ],
     },
 )

@@ -28,7 +28,278 @@
 
 import sys
 import os
+import shutil
+
+from setuptools.command.build_py import build_py
+from setuptools.command.develop import develop
+from setuptools.command.install import install
+
+# after setuptools, which provides distutils on Python >= 3.12
+from distutils.command.install_data import install_data  # noqa: I100
+
 from generate_parameter_library_py.generate_python_module import run
+
+
+def _source_dir(distribution):
+    # colcon runs `setup.py develop` from the build directory through a
+    # symlinked setup.py; resolve it so paths stay relative to the source.
+    return os.path.dirname(os.path.realpath(distribution.script_name or 'setup.py'))
+
+
+def _resolve_package(distribution, package, yaml_file):
+    if package:
+        return package
+    packages = distribution.packages or []
+    candidate = os.path.dirname(os.path.normpath(yaml_file)).replace(os.sep, '.')
+    if candidate in packages:
+        return candidate
+    if distribution.get_name() in packages:
+        return distribution.get_name()
+    raise ValueError(
+        f'Cannot infer the Python package for {yaml_file}; pass package=<name>.'
+    )
+
+
+def _output_file(command, spec, package_root):
+    """Return the resolved package of spec and the path its module is written to."""
+    module_name, yaml_file, _, package = spec
+    package = _resolve_package(command.distribution, package, yaml_file)
+    return package, os.path.join(package_root(package), module_name + '.py')
+
+
+def _generate(command, specs, package_root, add_missing_init):
+    """Generate every spec into package_root(package) and return the written files."""
+    source_dir = _source_dir(command.distribution)
+    outputs = []
+    for spec in specs:
+        _, yaml_file, validation_module, _ = spec
+        package, output_file = _output_file(command, spec, package_root)
+        source_init = os.path.join(
+            source_dir, command.get_package_dir(package), '__init__.py'
+        )
+        # Only add an __init__.py when the source package has none, so the
+        # user's own __init__.py is never replaced.
+        run(
+            output_file,
+            os.path.join(source_dir, yaml_file),
+            validation_module,
+            create_init=add_missing_init and not os.path.exists(source_init),
+        )
+        outputs.append(output_file)
+    return outputs
+
+
+def _replace_outputs(command, kind, outputs):
+    """Delete the files the previous ``kind`` run generated that outputs no longer has.
+
+    A module whose YAML was renamed or removed from setup.py would otherwise
+    stay next to the package's own files and keep being installed or imported.
+    Only files listed in the record are deleted, so user files are never touched.
+    """
+    record = os.path.join(
+        command.get_finalized_command('build').build_base,
+        f'generate_parameter_library_{kind}.txt',
+    )
+    outputs = [os.path.abspath(output) for output in outputs]
+    if os.path.exists(record):
+        with open(record) as f:
+            for stale in set(f.read().splitlines()) - set(outputs):
+                if os.path.exists(stale):
+                    os.remove(stale)
+    os.makedirs(os.path.dirname(record), exist_ok=True)
+    with open(record, 'w') as f:
+        f.write('\n'.join(outputs))
+
+
+def _install_definitions(command, specs, link):
+    """Install every definition as share/<distribution>/parameter_definitions/<module>.yaml.
+
+    Like generate_parameter_library() in CMake, so that tools such as
+    generate_parameter_library_validate find it for binary and underlay
+    installs. A module name that several modules share, in different Python
+    packages, is qualified as <package>.<module>.yaml, so no definition replaces
+    another. data_files cannot rename, so each definition is placed under its
+    installed name in the build tree first: a link to the real source for
+    editable installs, which colcon --symlink-install installs as a link, else
+    or where links are not available (e.g. Windows without the symlink
+    privilege) a copy of it.
+    """
+    source_dir = _source_dir(command.distribution)
+    stage = os.path.abspath(
+        os.path.join(
+            command.get_finalized_command('build').build_base,
+            'parameter_definitions',
+        )
+    )
+    os.makedirs(stage, exist_ok=True)
+    module_names = [module_name for module_name, _, _, _ in specs]
+    staged = []
+    for module_name, yaml_file, _, package in specs:
+        name = module_name
+        if module_names.count(module_name) > 1:
+            package = _resolve_package(command.distribution, package, yaml_file)
+            name = f'{package}.{module_name}'
+        source = os.path.realpath(os.path.join(source_dir, yaml_file))
+        target = os.path.join(stage, name + '.yaml')
+        if os.path.lexists(target):
+            os.remove(target)
+        staged.append(target)
+        if link:
+            try:
+                os.symlink(source, target)
+                continue
+            except OSError:
+                pass  # no symlinks available, copy instead
+        shutil.copyfile(source, target)
+    entry = (
+        os.path.join('share', command.distribution.get_name(), 'parameter_definitions'),
+        [_relative_to_cwd(path) for path in staged],
+    )
+    distribution = command.distribution
+    if distribution.data_files is None:
+        distribution.data_files = []
+    if entry not in distribution.data_files:
+        distribution.data_files.append(entry)
+    # data commands given on the command line, e.g. colcon's symlink_data, were
+    # created with the data_files of before, None if setup() gave none
+    for other in distribution.command_obj.values():
+        if isinstance(other, install_data) and other.data_files is None:
+            other.data_files = distribution.data_files
+
+
+def _relative_to_cwd(path):
+    """Spell a staged file relative to the working directory, like data_files.
+
+    install_data resolves relative names against the working directory. An
+    absolute name would end up in SOURCES.txt, which setuptools without its
+    build directory filter (e.g. 59.6 on Ubuntu 22.04) rejects with
+    "setup script specifies an absolute path" when include_package_data is set.
+    """
+    try:
+        return os.path.relpath(path)
+    except ValueError:  # no relative path, e.g. on another drive on Windows
+        return path
+
+
+def _source_package_root(command):
+    source_dir = _source_dir(command.distribution)
+    return lambda pkg: os.path.join(source_dir, command.get_package_dir(pkg))
+
+
+def parameter_cmdclass(
+    module_name=None, yaml_file=None, validation_module='', package=None, modules=None
+):
+    """
+    Return setuptools command classes that generate parameter modules.
+
+    Pass the result as ``setup(cmdclass=...)``. Give one module through the
+    positional arguments, or several through ``modules``, a list of dicts with
+    the keys ``module_name``, ``yaml_file`` and optionally ``validation_module``
+    and ``package``.
+
+    ``yaml_file`` is relative to the directory holding setup.py. ``package`` is
+    the Python package the module is generated into; it defaults to the yaml
+    file's directory when that is a package, else to the distribution name.
+    Regular builds generate into the build tree, so the module is installed
+    with the rest of the package. Editable installs (``colcon build
+    --symlink-install``, ``pip install -e``) generate into the source package,
+    which is the copy Python imports in that mode; ``develop --uninstall``,
+    which colcon runs when such a build is rebuilt without
+    ``--symlink-install``, removes them from there again. A module that is no
+    longer generated, e.g. after renaming it, is removed on the next build.
+
+    The definitions are installed as
+    ``share/<distribution>/parameter_definitions/<module_name>.yaml``, also by an
+    ``install --skip-build`` that runs in a separate process from the build.
+    """
+    if modules is None:
+        modules = [
+            {
+                'module_name': module_name,
+                'yaml_file': yaml_file,
+                'validation_module': validation_module,
+                'package': package,
+            }
+        ]
+    elif module_name or yaml_file or validation_module or package:
+        raise ValueError(
+            'Pass either module_name, yaml_file, validation_module and package, '
+            'or modules.'
+        )
+    specs = [
+        (
+            module['module_name'],
+            module['yaml_file'],
+            module.get('validation_module', ''),
+            module.get('package'),
+        )
+        for module in modules
+    ]
+
+    class BuildPy(build_py):
+        def run(self):
+            super().run()
+            if getattr(self, 'editable_mode', False):
+                # PEP 660 editable wheel: the source tree is what gets imported.
+                # The generated files live there, so they stay out of get_outputs().
+                generated = _generate(
+                    self, specs, _source_package_root(self), add_missing_init=False
+                )
+                _replace_outputs(self, 'source', generated)
+                _install_definitions(self, specs, link=True)
+                return
+            self._generated = _generate(
+                self,
+                specs,
+                lambda pkg: os.path.join(self.build_lib, *pkg.split('.')),
+                add_missing_init=True,
+            )
+            _replace_outputs(self, 'build_lib', self._generated)
+            _install_definitions(self, specs, link=False)
+
+        def get_source_files(self):
+            # sdist collects its pure-Python inputs from here.
+            return super().get_source_files() + [
+                yaml_file for _, yaml_file, _, _ in specs
+            ]
+
+        def get_outputs(self, *args, **kwargs):
+            return super().get_outputs(*args, **kwargs) + getattr(
+                self, '_generated', []
+            )
+
+    class Develop(develop):
+        def run(self):
+            build_py_cmd = self.get_finalized_command('build_py')
+            package_root = _source_package_root(build_py_cmd)
+            if self.uninstall:
+                # colcon runs `develop --uninstall` when a --symlink-install
+                # build is rebuilt without it; a module left in the source tree
+                # would shadow the installed one wherever the source is on
+                # sys.path, e.g. in `colcon test`.
+                for spec in specs:
+                    _, output_file = _output_file(build_py_cmd, spec, package_root)
+                    if os.path.exists(output_file):
+                        os.remove(output_file)
+                _replace_outputs(build_py_cmd, 'source', [])
+            else:
+                generated = _generate(
+                    build_py_cmd, specs, package_root, add_missing_init=False
+                )
+                _replace_outputs(build_py_cmd, 'source', generated)
+                _install_definitions(build_py_cmd, specs, link=True)
+            super().run()
+
+    class Install(install):
+        def run(self):
+            # Also registered here, as `install --skip-build` in a process that
+            # did not run build_py, e.g. a separate packaging step, would not
+            # install the definitions otherwise. Before install runs, because it
+            # only runs install_data when there are data files.
+            _install_definitions(self, specs, link=False)
+            super().run()
+
+    return {'build_py': BuildPy, 'develop': Develop, 'install': Install}
 
 
 def generate_parameter_module(
@@ -74,4 +345,13 @@ def generate_parameter_module(
     if install_dir:
         run(
             os.path.join(install_dir, module_name + '.py'), yaml_file, validation_module
+        )
+        # see _install_definitions()
+        definitions_dir = os.path.join(
+            install_base, 'share', pkg_name, 'parameter_definitions'
+        )
+        os.makedirs(definitions_dir, exist_ok=True)
+        shutil.copyfile(
+            os.path.realpath(yaml_file),
+            os.path.join(definitions_dir, module_name + '.yaml'),
         )

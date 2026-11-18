@@ -104,8 +104,73 @@ def validation_base_name(function_name: str):
 
 
 @typechecked
-def validate_validator_combinations(param_name: str, validations_dict: dict):
+def validate_fixed_default_size(
+    param_name: str,
+    defined_type: str,
+    default_value: Any,
+    validations_dict: dict,
+):
+    capacity = fixed_type_size(defined_type)
+    if capacity is None or default_value is None:
+        return
+    if array_type(defined_type) and not isinstance(default_value, list):
+        return
+    if not array_type(defined_type) and not isinstance(default_value, str):
+        return
+
+    default_size = len(default_value)
+    if default_size > capacity:
+        raise compile_error(
+            'Parameter {} has a default value of size {}, which exceeds '
+            "the capacity of type '{}' ({}).".format(
+                param_name, default_size, defined_type, capacity
+            )
+        )
+
+    for function_name, arguments in validations_dict.items():
+        if validation_base_name(function_name) != 'fixed_size':
+            continue
+
+        expected_size = arguments
+        if isinstance(arguments, list) and len(arguments) == 1:
+            expected_size = arguments[0]
+        if isinstance(expected_size, int) and default_size != expected_size:
+            raise compile_error(
+                'Parameter {} has a default value of size {}, but its '
+                "'fixed_size' validation requires {}.".format(
+                    param_name, default_size, expected_size
+                )
+            )
+
+
+@typechecked
+def validate_validator_combinations(
+    param_name: str, defined_type: str, validations_dict: dict
+):
     validation_names = {validation_base_name(name) for name in validations_dict}
+
+    scalar_bound_validators = {'bounds', 'gt', 'gt_eq', 'lt', 'lt_eq'}
+    element_bound_validators = {
+        'element_bounds',
+        'lower_element_bounds',
+        'upper_element_bounds',
+    }
+    if array_type(defined_type) and validation_names.intersection(
+        scalar_bound_validators
+    ):
+        raise compile_error(
+            "Parameter {} has array type '{}' but uses a scalar bound validator. "
+            "Use 'element_bounds/lower_element_bounds/upper_element_bounds' instead.".format(
+                param_name, defined_type
+            )
+        )
+    if not array_type(defined_type) and validation_names.intersection(
+        element_bound_validators
+    ):
+        raise compile_error(
+            "Parameter {} has scalar type '{}' but uses an element bound validator. "
+            "Use 'bounds/gt/gt_eq/lt/lt_eq' instead.".format(param_name, defined_type)
+        )
 
     if 'element_bounds' in validation_names and {
         'lower_element_bounds',
@@ -117,9 +182,8 @@ def validate_validator_combinations(param_name: str, validations_dict: dict):
             )
         )
 
-    scalar_bound_validators = {'gt', 'gt_eq', 'lt', 'lt_eq'}
     if 'bounds' in validation_names and validation_names.intersection(
-        scalar_bound_validators
+        scalar_bound_validators - {'bounds'}
     ):
         raise compile_error(
             "Parameter {} cannot combine 'bounds' with scalar bound validators "
@@ -235,8 +299,9 @@ class CodeGenVariableBase:
 
         self.name = name
         self.default_value = default_value
-        self.name = name
         self.param_name = param_name
+        # Size of a fixed size type, set by CodeGenFixedVariable.process_type.
+        self.fixed_size = None
         self.defined_type, template = self.process_type(defined_type)
         self.array_type = array_type(self.defined_type)
 
@@ -255,12 +320,23 @@ class CodeGenVariableBase:
         func = self.conversion.defined_type_to_lang_type[self.defined_base_type]
         self.lang_base_type = func(self.defined_base_type, template)
         func = self.conversion.lang_str_value_func[self.defined_type]
+
+        def incorrect_type():
+            return compile_error(
+                f'Parameter {param_name} has incorrect type. Expected: {defined_type}, got: {self.get_yaml_type_from_python(default_value)}'
+            )
+
+        # YAML bools are Python ints, so the type check of the numeric
+        # conversions accepts them and they would be written as `True`.
+        values = default_value if isinstance(default_value, list) else [default_value]
+        if self.defined_base_type in ('int', 'double') and any(
+            isinstance(value, bool) for value in values
+        ):
+            raise incorrect_type()
         try:
             self.lang_str_value = func(default_value)
         except TypeCheckError:
-            raise compile_error(
-                f'Parameter {param_name} has incorrect type. Expected: {defined_type}, got: {self.get_yaml_type_from_python(default_value)}'
-            )
+            raise incorrect_type()
 
     def parameter_as_function_str(self):
         if self.defined_type not in self.conversion.yaml_type_to_as_function:
@@ -272,15 +348,26 @@ class CodeGenVariableBase:
 
     def get_yaml_type_from_python(self, arg):
         if isinstance(arg, list):
-            return self.conversion.python_list_to_yaml_type[str(type(arg[0]))]
-        else:
-            return self.conversion.python_val_to_yaml_type[str(type(arg[0]))]
+            if not arg:
+                return 'empty array'
+            # name every element type, so the offending element is visible
+            element_types = list(
+                dict.fromkeys(self.get_yaml_type_from_python(value) for value in arg)
+            )
+            if len(element_types) > 1:
+                return f'mixed array ({", ".join(element_types)})'
+            return self.conversion.python_list_to_yaml_type.get(
+                str(type(arg[0])), f'array of {element_types[0]}'
+            )
+        # values without a ROS type, such as null or a map, still get a name
+        fallback = {type(None): 'null', dict: 'map'}.get(type(arg), type(arg).__name__)
+        return self.conversion.python_val_to_yaml_type.get(str(type(arg)), fallback)
 
     def process_type(self, defined_type):
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def get_parameter_type(self):
-        raise NotImplemented()
+        raise NotImplementedError()
 
 
 class CodeGenVariable(CodeGenVariableBase):
@@ -294,6 +381,7 @@ class CodeGenVariable(CodeGenVariableBase):
 class CodeGenFixedVariable(CodeGenVariableBase):
     def process_type(self, defined_type):
         size = fixed_type_size(defined_type)
+        self.fixed_size = size
         tmp = defined_type.split('_')
         yaml_base_type = tmp[0]
         func = self.conversion.defined_type_to_lang_type[yaml_base_type]
@@ -776,6 +864,10 @@ def preprocess_inputs(language, name, value, nested_name_list):
 
     # optional attributes
     default_value = value.get('default_value', None)
+    validations_dict = value.get('validation', {})
+    validate_fixed_default_size(
+        param_name, defined_type, default_value, validations_dict
+    )
     if not is_fixed_type(defined_type):
         code_gen_variable = CodeGenVariable(
             language, name, param_name, defined_type, default_value
@@ -789,11 +881,10 @@ def preprocess_inputs(language, name, value, nested_name_list):
     read_only = bool(value.get('read_only', False))
     validations = []
     additional_constraints = value.get('additional_constraints', '')
-    validations_dict = value.get('validation', {})
     if is_fixed_type(defined_type):
         validations_dict['size_lt<>'] = fixed_type_size(defined_type) + 1
 
-    validate_validator_combinations(param_name, validations_dict)
+    validate_validator_combinations(param_name, defined_type, validations_dict)
 
     for func_name in validations_dict:
         args = validations_dict[func_name]
@@ -821,7 +912,7 @@ class GenerateCode:
             self.comments = '.. auto-generated DO NOT EDIT'
         elif language == 'markdown':
             self.comments = '<!--- auto-generated DO NOT EDIT -->'
-        elif language == 'python' or language == 'markdown':
+        elif language == 'python':
             self.comments = '# auto-generated DO NOT EDIT'
         else:
             raise compile_error(
@@ -846,11 +937,15 @@ class GenerateCode:
     def parse(self, yaml_file, validate_header):
         with open(yaml_file) as f:
             try:
-                docs = yaml.load_all(f, Loader=yaml.Loader)
+                # SafeLoader: a definition is plain data, and a python/* tag in
+                # it must not run code during a build or a validation.
+                docs = yaml.load_all(f, Loader=yaml.SafeLoader)
                 doc = list(docs)[0]
             except ParserError as e:
                 raise compile_error(str(e))
             except ScannerError as e:
+                raise compile_error(str(e))
+            except yaml.YAMLError as e:
                 raise compile_error(str(e))
 
             if len(doc) != 1:
@@ -967,9 +1062,14 @@ class GenerateCode:
             self.declare_parameter_sets.append(declare_parameter_set)
 
     def parse_dict(self, name, root_map, nested_name):
-        if isinstance(root_map, dict) and isinstance(
-            next(iter(root_map.values())), dict
-        ):
+        # A string `type` marks a parameter whatever order its fields are in,
+        # while a group only holds mappings (possibly a parameter named `type`).
+        is_group = (
+            isinstance(root_map, dict)
+            and not isinstance(root_map.get('type'), str)
+            and any(isinstance(value, dict) for value in root_map.values())
+        )
+        if is_group:
             cur_struct_tree = self.struct_tree
             cur_stack_struct_tree = self.stack_struct_tree
 

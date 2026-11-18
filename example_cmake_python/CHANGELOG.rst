@@ -2,6 +2,17 @@
 Changelog for package cmake_generate_parameter_module_example
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.4.0 (2026-11-17)
+------------------
+* Install parameter definitions to share/<package>/parameter_definitions (`#419 <https://github.com/ros-tooling/generate_parameter_library/issues/419>`_)
+* Name the offending element and bound in element bound messages (`#410 <https://github.com/ros-tooling/generate_parameter_library/issues/410>`_)
+* Add tests for cmake_python example (`#398 <https://github.com/ros-tooling/generate_parameter_library/issues/398>`_)
+* Validate example configs with the standalone validator in CI (`#401 <https://github.com/ros-tooling/generate_parameter_library/issues/401>`_)
+* Contributors: Christoph Fröhlich
+
+1.3.1 (2026-10-05)
+------------------
+
 1.3.0 (2026-07-24)
 ------------------
 * Use a shared symlinked parameter file in all examples (`#361 <https://github.com/PickNikRobotics/generate_parameter_library/issues/361>`_)

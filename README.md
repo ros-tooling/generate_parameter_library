@@ -78,13 +78,67 @@ ament_export_targets(${PROJECT_NAME}Targets HAS_LIBRARY_TARGET)
 
 **setup.py**
 ```python
-from generate_parameter_library_py.setup_helper import generate_parameter_module
+from setuptools import setup
+from generate_parameter_library_py.setup_helper import parameter_cmdclass
 
-generate_parameter_module(
-  "turtlesim_parameters", # python module name for parameter library
-  "turtlesim/turtlesim_parameters.yaml", # path to input yaml file
+setup(
+  name="turtlesim",
+  packages=["turtlesim"],
+  cmdclass=parameter_cmdclass(
+    "turtlesim_parameters", # python module name for parameter library
+    "turtlesim/turtlesim_parameters.yaml", # path to input yaml file
+  ),
 )
 ```
+
+The module is generated during the build, so it installs with the package.
+With `--symlink-install` and other editable installs, Python imports the source package, so the module is generated there instead (add it to `.gitignore`); rebuilding without `--symlink-install` removes it again.
+A module that is renamed or removed from `setup.py` is deleted from the build tree or source package on the next build, so it is not installed or imported anymore.
+For several modules, pass a list:
+
+```python
+cmdclass=parameter_cmdclass(modules=[
+  {"module_name": "turtlesim_parameters", "yaml_file": "turtlesim/turtlesim_parameters.yaml"},
+  {"module_name": "pen_parameters", "yaml_file": "config/pen_parameters.yaml", "package": "turtlesim"},
+]),
+```
+
+If the package has its own `__init__.py`, `colcon test` imports the source tree before the installed package, so tests must drop the package's source directory from `sys.path`; see [example_python/test/conftest.py](example_python/test/conftest.py).
+The older `generate_parameter_module()` call in `setup.py` still works.
+
+For a Python package built with `ament_cmake_python`, use `generate_parameter_module()`
+in `CMakeLists.txt` and install the Python package with `ament_python_install_package()`:
+
+```cmake
+cmake_minimum_required(VERSION 3.16)
+project(turtlesim)
+
+find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+find_package(generate_parameter_library REQUIRED)
+
+generate_parameter_module(turtlesim_parameters
+  src/turtlesim_parameters.yaml
+  # Optional third argument: turtlesim.custom_validation
+)
+
+ament_python_install_package(${PROJECT_NAME})
+ament_package()
+```
+
+This example expects a Python package directory named `turtlesim` alongside
+`CMakeLists.txt`. In addition to the `generate_parameter_library` dependency above,
+declare `ament_cmake_python` as a build tool dependency in `package.xml` and use
+`ament_cmake` as the package's build type:
+
+```xml
+<buildtool_depend>ament_cmake_python</buildtool_depend>
+<export>
+  <build_type>ament_cmake</build_type>
+</export>
+```
+
+See [example_cmake_python](example_cmake_python) for the complete package.
 
 ### Use generated struct in project source code
 
@@ -113,18 +167,18 @@ int main(int argc, char * argv[])
 ```python
 import rclpy
 from rclpy.node import Node
-from turtlesim_pkg.turtlesim_parameters import turtlesim_parameters
+from turtlesim.turtlesim_parameters import turtlesim
 
 def main(args=None):
   rclpy.init(args=args)
   node = Node("turtlesim")
-  param_listener = turtlesim_parameters.ParamListener(node)
+  param_listener = turtlesim.ParamListener(node)
   params = param_listener.get_params()
 
   color = params.background
   node.get_logger().info(
     "Background color (r,g,b): %d, %d, %d" %
-    color.r, color.g, color.b)
+    (color.r, color.g, color.b))
 ```
 
 ### Use example yaml files in tests
@@ -167,6 +221,7 @@ when using `gmock` test library.
 * [Example Project](#example-project)
 * [Generated code output](#generated-code-output)
 * [Generate markdown documentation](#generate-markdown-documentation)
+* [Validate a configuration file](#validate-a-configuration-file)
 
 ### Cpp namespace
 The root element of the YAML file determines the namespace used in the generated C++ code.
@@ -195,6 +250,7 @@ cpp_namespace:
 ```
 
 A parameter is a YAML dictionary with the only required key being `type`.
+The file is read as plain YAML data: language-specific tags such as `!!python/object` are rejected.
 
 | Field                  | Description                                                                                                    |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -517,7 +573,7 @@ force_torque_broadcaster_controller:
 
 
 ### Example Project
-See [cpp example](https://github.com/PickNikRobotics/generate_parameter_library/tree/main/example) or [python example](https://github.com/PickNikRobotics/generate_parameter_library/tree/main/example_python) for complete examples of how to use the generate_parameter_library.
+See [cpp example](https://github.com/ros-tooling/generate_parameter_library/tree/main/example) or [python example](https://github.com/ros-tooling/generate_parameter_library/tree/main/example_python) for complete examples of how to use the generate_parameter_library.
 
 ### Generated code output
 The generated code primarily consists of two major components:
@@ -578,6 +634,146 @@ generate_parameter_library_markdown --input_yaml example/src/parameters.yaml --o
 This will generate a file `parameters.md` in the current folder that contains a markdown
 representation of the `parameters.yaml` file that you can directly include into your documentation.
 
+### Validate a configuration file
+
+`generate_parameter_library_validate` checks a ROS 2 parameter configuration
+file against one or more parameter definition files. It needs no ROS 2
+installation, no built workspace and no running node, so it can run as a CI step
+or on the laptop of somebody configuring a robot.
+
+```
+generate_parameter_library_validate \
+  --param-definition example/src/parameters.yaml \
+  --config config/robot.yaml
+```
+
+Pass `--config` more than once to check configuration files that are loaded
+together, as `parameters=[common.yaml, robot.yaml]` in a launch file or
+repeated `--params-file` arguments do. The files are merged in the given order,
+so a later file overrides an earlier one, and a node that gets a mandatory
+parameter from one file and the rest from another is checked as it starts.
+Configuration files that are not loaded together, for example those of
+different robots that use the same node name, are checked in separate runs.
+
+A configuration section may be written as `node:`, `/node:`, under any
+number of namespace levels, or with the wildcards `/*` (one level) and `/**`
+(any number of levels), as in `/**:` or `/robot/*/node:`, and a file may hold
+several nodes. As at runtime, a node receives the values of every section that
+matches its name, in the order of the files and then of the sections in a file,
+so a later section overrides an earlier one. A section whose node name is a
+wildcard is only checked on its own when no file names a node.
+
+Pass `--param-definition` more than once to check several definitions in one
+run. Without `--node`, a configuration section is matched to the definition
+whose root element has the same name; when exactly one definition is given and
+no section matches it, it is used for every section.
+
+Pass `--node` with the name of the node that loads the files, as `my_node` or
+`/ns/my_node`, to check only that node; it may be given more than once. The
+node is checked with the values of every section that applies to it, including
+wildcard sections, even if no section names it, and sections of other nodes in
+the same files are left out. A node that no section applies to is an error, as
+the name is most likely misspelled. This fits files shared by several nodes,
+such as a ros2_control configuration with several controllers.
+
+With `--node`, the node is checked against the definition named after it and
+every definition whose root element names no node, together, as for a node that
+uses several parameter libraries, such as a controller and its plugin. In
+`--strict` mode a parameter is unknown only if none of them declares it. A
+parameter that several of them declare takes the default of the first given
+definition, as the node keeps the first declaration, and its value has to pass
+the type and validators of every one, as every library reads it back. A
+definition named after another node belongs to that node and is only read if
+that node is given too, and a single definition is used for every given node.
+
+```bash
+generate_parameter_library_validate \
+  --param-definition src/joint_trajectory_controller_parameters.yaml \
+  --param-definition src/pid_trajectory_plugin_parameters.yaml \
+  --config config/controllers_common.yaml \
+  --config config/arm_controller.yaml \
+  --node arm_controller
+```
+
+Without further options the tool reports what makes a node fail to start or
+behave unexpectedly:
+
+* a value whose type does not match the declared type, including an integer
+  written where a `double` is declared, which ROS 2 does not convert
+* a nested sequence such as `[["a", "b"]]`, which ROS 2 parameters do not
+  support: `rcl_yaml_param_parser` rejects the whole file or loads a different
+  value, for example `["x", ["a"]]` as `["a"]`
+* a quoted scalar where a number or a bool is declared, which ROS 2 keeps a
+  string, or a plain `y` or `on` where a string is declared, which ROS 2
+  reads as a bool
+* an empty sequence, which `rcl_yaml_param_parser` cannot give a type and reads
+  as `PARAMETER_NOT_SET` rather than as an empty array
+* a sequence that mixes element types, such as `["a", 2]` or `[1, 2.5]`, or
+  that holds two or more nested sequences, such as `[["a"], ["b"]]`, which
+  makes `rcl_yaml_param_parser` reject the whole file; this is checked in each
+  file before merging, because a later file cannot override a file that does
+  not load, and for every occurrence of a repeated key or node; the element
+  types are the ones ROS 2 reads, so `[1e5, 2.0]` is accepted while
+  `["1e5", 1e5]` is not
+* a YAML alias such as `*base` or a merge key `<<: *base`, which
+  `rcl_yaml_param_parser` does not support, so it rejects the whole file
+* a value rejected by a built-in validator such as `bounds<>` or `one_of<>`
+* a parameter that is declared without a `default_value` and that the
+  configuration does not set
+* a parameter the configuration omits whose `default_value` fails the same
+  checks, because the node validates the effective value
+* without `--node`, two definitions that declare the same root element
+
+Scalars are read the way `rcl_yaml_param_parser` reads them rather than the way
+PyYAML does, so `1e5` counts as a `double` while a quoted `"2.0"` stays a
+`string`, exactly as at runtime.
+
+Adding `--strict` also reports parameters the configuration sets that no
+definition declares, with a suggestion when the name is close to a declared one,
+and parameters absent from the configuration that will take their default. The
+parameters every node declares for itself, such as `use_sim_time`, and the
+subtree under a parameter of type `none`, are not reported.
+
+```
+WARNING: my_node.background.b: missing from config, will use default_value 0
+ERROR: my_node.background.r: Value 300 in parameter 'background.r' must be within bounds [0, 255]
+ERROR: my_node.pid.rate: expected type 'double', got 'string'
+ERROR: my_node.background.colour: unknown parameter (did you mean 'background.r'?)
+3 error(s) found
+```
+
+The exit status is 1 when any error was reported and 0 otherwise, so the tool
+can gate a pipeline:
+
+```yaml
+- name: Validate robot config
+  run: |
+    pip install generate_parameter_library_py
+    generate_parameter_library_validate \
+      --param-definition src/navigation/config/nav_parameters.yaml \
+      --param-definition src/behavior/config/behavior_parameters.yaml \
+      --config deploy/config/robot_production.yaml \
+      --strict
+```
+
+Packages install each definition as
+`share/<package>/parameter_definitions/<name>.yaml`, so a configuration can also
+be checked against a package installed from binaries or in an underlay, without
+its source. `<name>` is the library name given to `generate_parameter_library()`
+or `generate_parameter_module()` in CMake, or the module name given to
+`parameter_cmdclass()` or `generate_parameter_module()` in `setup.py`
+(`<package>.<module>` if modules in several Python packages share the name):
+
+```bash
+generate_parameter_library_validate \
+  --param-definition "$(ros2 pkg prefix joint_state_broadcaster)/share/joint_state_broadcaster/parameter_definitions/joint_state_broadcaster_parameters.yaml" \
+  --config config/controllers.yaml
+```
+
+Custom validator functions are C++ and cannot run outside a build, so they are
+reported as skipped rather than silently ignored. `read_only` describes
+behaviour at runtime and is not checked.
+
 # FAQ
 
 Q. What happens if I declare a parameter twice? Will I get an error at runtime?
@@ -602,8 +798,8 @@ A. The generated library outputs debug logs whenever a parameter is read from RO
 
 ROS2 Distro | Branch | Build status | Documentation | Package Build
 :---------: | :----: | :----------: | :-----------: | :---------------:
-**Rolling** | [`main`](https://github.com/PickNikRobotics/generate_parameter_library/tree/main) | [![Rolling Binary Build](https://github.com/PickNikRobotics/generate_parameter_library/actions/workflows/rolling-binary-build.yaml/badge.svg?branch=main)](https://github.com/PickNikRobotics/generate_parameter_library/actions/workflows/rolling-binary-build.yaml?branch=main) <br> [![Rolling Semi-Binary Build](https://github.com/PickNikRobotics/generate_parameter_library/actions/workflows/rolling-semi-binary-build.yaml/badge.svg?branch=main)](https://github.com/PickNikRobotics/generate_parameter_library/actions/workflows/rolling-semi-binary-build.yaml?branch=main) <br> [![build.ros2.org](https://build.ros2.org/buildStatus/icon?job=Rdev__generate_parameter_library__ubuntu_resolute_amd64&subject=build.ros2.org)](https://build.ros2.org/job/Rdev__generate_parameter_library__ubuntu_resolute_amd64/) | [Documentation](https://docs.ros.org/en/rolling/p/generate_parameter_library/) | [![Build Status](https://build.ros2.org/buildStatus/icon?job=Rbin_uR64__generate_parameter_library__ubuntu_resolute_amd64__binary)](https://build.ros2.org/job/Rbin_uR64__generate_parameter_library__ubuntu_resolute_amd64__binary/) <br> [![Build Status](https://build.ros2.org/buildStatus/icon?job=Rbin_uR64__generate_parameter_library_py__ubuntu_resolute_amd64__binary)](https://build.ros2.org/job/Rbin_uR64__generate_parameter_library_py__ubuntu_resolute_amd64__binary/)
-**Lyrical** | [`main`](https://github.com/PickNikRobotics/generate_parameter_library/tree/main) | see above <br> [![build.ros2.org](https://build.ros2.org/buildStatus/icon?job=Ldev__generate_parameter_library__ubuntu_resolute_amd64&subject=build.ros2.org)](https://build.ros2.org/job/Ldev__generate_parameter_library__ubuntu_resolute_amd64/) | [Documentation](https://docs.ros.org/en/rolling/p/generate_parameter_library/) | [![Build Status](https://build.ros2.org/buildStatus/icon?job=Lbin_uR64__generate_parameter_library__ubuntu_resolute_amd64__binary)](https://build.ros2.org/job/Lbin_uR64__generate_parameter_library__ubuntu_resolute_amd64__binary/) <br> [![Build Status](https://build.ros2.org/buildStatus/icon?job=Lbin_uR64__generate_parameter_library_py__ubuntu_resolute_amd64__binary)](https://build.ros2.org/job/Lbin_uR64__generate_parameter_library_py__ubuntu_resolute_amd64__binary/)
-**Kilted** | [`humble`](https://github.com/PickNikRobotics/generate_parameter_library/tree/humble) | see below <br> [![build.ros2.org](https://build.ros2.org/buildStatus/icon?job=Kdev__generate_parameter_library__ubuntu_noble_amd64&subject=build.ros2.org)](https://build.ros2.org/job/Kdev__generate_parameter_library__ubuntu_noble_amd64/) | [Documentation](https://docs.ros.org/en/kilted/p/generate_parameter_library/) | [![Build Status](https://build.ros2.org/buildStatus/icon?job=Kbin_uN64__generate_parameter_library__ubuntu_noble_amd64__binary)](https://build.ros2.org/job/Kbin_uN64__generate_parameter_library__ubuntu_noble_amd64__binary/) <br> [![Build Status](https://build.ros2.org/buildStatus/icon?job=Kbin_uN64__generate_parameter_library_py__ubuntu_noble_amd64__binary)](https://build.ros2.org/job/Kbin_uN64__generate_parameter_library_py__ubuntu_noble_amd64__binary/)
-**Jazzy** | [`humble`](https://github.com/PickNikRobotics/generate_parameter_library/tree/humble) | see below <br> [![build.ros2.org](https://build.ros2.org/buildStatus/icon?job=Jdev__generate_parameter_library__ubuntu_noble_amd64&subject=build.ros2.org)](https://build.ros2.org/job/Jdev__generate_parameter_library__ubuntu_noble_amd64/) | [Documentation](https://docs.ros.org/en/jazzy/p/generate_parameter_library/) | [![Build Status](https://build.ros2.org/buildStatus/icon?job=Jbin_uN64__generate_parameter_library__ubuntu_noble_amd64__binary)](https://build.ros2.org/job/Jbin_uN64__generate_parameter_library__ubuntu_noble_amd64__binary/) <br> [![Build Status](https://build.ros2.org/buildStatus/icon?job=Jbin_uN64__generate_parameter_library_py__ubuntu_noble_amd64__binary)](https://build.ros2.org/job/Jbin_uN64__generate_parameter_library_py__ubuntu_noble_amd64__binary/)
-**Humble** | [`humble`](https://github.com/PickNikRobotics/generate_parameter_library/tree/humble) | [![Humble Binary Build](https://github.com/PickNikRobotics/generate_parameter_library/actions/workflows/humble-binary-build.yaml/badge.svg?branch=humble)](https://github.com/PickNikRobotics/generate_parameter_library/actions/workflows/humble-binary-build.yaml?branch=humble) <br> [![Humble Semi-Binary Build](https://github.com/PickNikRobotics/generate_parameter_library/actions/workflows/humble-semi-binary-build.yaml/badge.svg?branch=humble)](https://github.com/PickNikRobotics/generate_parameter_library/actions/workflows/humble-semi-binary-build.yaml?branch=humble) <br> [![build.ros2.org](https://build.ros2.org/buildStatus/icon?job=Hdev__generate_parameter_library__ubuntu_jammy_amd64&subject=build.ros2.org)](https://build.ros2.org/job/Hdev__generate_parameter_library__ubuntu_jammy_amd64/) | [Documentation](https://docs.ros.org/en/humble/p/generate_parameter_library/) | [![Build Status](https://build.ros2.org/buildStatus/icon?job=Hbin_uJ64__generate_parameter_library__ubuntu_jammy_amd64__binary)](https://build.ros2.org/job/Hbin_uJ64__generate_parameter_library__ubuntu_jammy_amd64__binary/) <br> [![Build Status](https://build.ros2.org/buildStatus/icon?job=Hbin_uJ64__generate_parameter_library_py__ubuntu_jammy_amd64__binary)](https://build.ros2.org/job/Hbin_uJ64__generate_parameter_library_py__ubuntu_jammy_amd64__binary/)
+**Rolling** | [`main`](https://github.com/ros-tooling/generate_parameter_library/tree/main) | [![Rolling Binary Build](https://github.com/ros-tooling/generate_parameter_library/actions/workflows/rolling-binary-build.yaml/badge.svg?branch=main)](https://github.com/ros-tooling/generate_parameter_library/actions/workflows/rolling-binary-build.yaml?branch=main) <br> [![Rolling Semi-Binary Build](https://github.com/ros-tooling/generate_parameter_library/actions/workflows/rolling-semi-binary-build.yaml/badge.svg?branch=main)](https://github.com/ros-tooling/generate_parameter_library/actions/workflows/rolling-semi-binary-build.yaml?branch=main) <br> [![build.ros2.org](https://build.ros2.org/buildStatus/icon?job=Rdev__generate_parameter_library__ubuntu_resolute_amd64&subject=build.ros2.org)](https://build.ros2.org/job/Rdev__generate_parameter_library__ubuntu_resolute_amd64/) | [Documentation](https://docs.ros.org/en/rolling/p/generate_parameter_library/) | [![Build Status](https://build.ros2.org/buildStatus/icon?job=Rbin_uR64__generate_parameter_library__ubuntu_resolute_amd64__binary)](https://build.ros2.org/job/Rbin_uR64__generate_parameter_library__ubuntu_resolute_amd64__binary/) <br> [![Build Status](https://build.ros2.org/buildStatus/icon?job=Rbin_uR64__generate_parameter_library_py__ubuntu_resolute_amd64__binary)](https://build.ros2.org/job/Rbin_uR64__generate_parameter_library_py__ubuntu_resolute_amd64__binary/)
+**Lyrical** | [`main`](https://github.com/ros-tooling/generate_parameter_library/tree/main) | see above <br> [![build.ros2.org](https://build.ros2.org/buildStatus/icon?job=Ldev__generate_parameter_library__ubuntu_resolute_amd64&subject=build.ros2.org)](https://build.ros2.org/job/Ldev__generate_parameter_library__ubuntu_resolute_amd64/) | [Documentation](https://docs.ros.org/en/rolling/p/generate_parameter_library/) | [![Build Status](https://build.ros2.org/buildStatus/icon?job=Lbin_uR64__generate_parameter_library__ubuntu_resolute_amd64__binary)](https://build.ros2.org/job/Lbin_uR64__generate_parameter_library__ubuntu_resolute_amd64__binary/) <br> [![Build Status](https://build.ros2.org/buildStatus/icon?job=Lbin_uR64__generate_parameter_library_py__ubuntu_resolute_amd64__binary)](https://build.ros2.org/job/Lbin_uR64__generate_parameter_library_py__ubuntu_resolute_amd64__binary/)
+**Kilted** | [`humble`](https://github.com/ros-tooling/generate_parameter_library/tree/humble) | see below <br> [![build.ros2.org](https://build.ros2.org/buildStatus/icon?job=Kdev__generate_parameter_library__ubuntu_noble_amd64&subject=build.ros2.org)](https://build.ros2.org/job/Kdev__generate_parameter_library__ubuntu_noble_amd64/) | [Documentation](https://docs.ros.org/en/kilted/p/generate_parameter_library/) | [![Build Status](https://build.ros2.org/buildStatus/icon?job=Kbin_uN64__generate_parameter_library__ubuntu_noble_amd64__binary)](https://build.ros2.org/job/Kbin_uN64__generate_parameter_library__ubuntu_noble_amd64__binary/) <br> [![Build Status](https://build.ros2.org/buildStatus/icon?job=Kbin_uN64__generate_parameter_library_py__ubuntu_noble_amd64__binary)](https://build.ros2.org/job/Kbin_uN64__generate_parameter_library_py__ubuntu_noble_amd64__binary/)
+**Jazzy** | [`humble`](https://github.com/ros-tooling/generate_parameter_library/tree/humble) | see below <br> [![build.ros2.org](https://build.ros2.org/buildStatus/icon?job=Jdev__generate_parameter_library__ubuntu_noble_amd64&subject=build.ros2.org)](https://build.ros2.org/job/Jdev__generate_parameter_library__ubuntu_noble_amd64/) | [Documentation](https://docs.ros.org/en/jazzy/p/generate_parameter_library/) | [![Build Status](https://build.ros2.org/buildStatus/icon?job=Jbin_uN64__generate_parameter_library__ubuntu_noble_amd64__binary)](https://build.ros2.org/job/Jbin_uN64__generate_parameter_library__ubuntu_noble_amd64__binary/) <br> [![Build Status](https://build.ros2.org/buildStatus/icon?job=Jbin_uN64__generate_parameter_library_py__ubuntu_noble_amd64__binary)](https://build.ros2.org/job/Jbin_uN64__generate_parameter_library_py__ubuntu_noble_amd64__binary/)
+**Humble** | [`humble`](https://github.com/ros-tooling/generate_parameter_library/tree/humble) | [![Humble Binary Build](https://github.com/ros-tooling/generate_parameter_library/actions/workflows/humble-binary-build.yaml/badge.svg?branch=humble)](https://github.com/ros-tooling/generate_parameter_library/actions/workflows/humble-binary-build.yaml?branch=humble) <br> [![Humble Semi-Binary Build](https://github.com/ros-tooling/generate_parameter_library/actions/workflows/humble-semi-binary-build.yaml/badge.svg?branch=humble)](https://github.com/ros-tooling/generate_parameter_library/actions/workflows/humble-semi-binary-build.yaml?branch=humble) <br> [![build.ros2.org](https://build.ros2.org/buildStatus/icon?job=Hdev__generate_parameter_library__ubuntu_jammy_amd64&subject=build.ros2.org)](https://build.ros2.org/job/Hdev__generate_parameter_library__ubuntu_jammy_amd64/) | [Documentation](https://docs.ros.org/en/humble/p/generate_parameter_library/) | [![Build Status](https://build.ros2.org/buildStatus/icon?job=Hbin_uJ64__generate_parameter_library__ubuntu_jammy_amd64__binary)](https://build.ros2.org/job/Hbin_uJ64__generate_parameter_library__ubuntu_jammy_amd64__binary/) <br> [![Build Status](https://build.ros2.org/buildStatus/icon?job=Hbin_uJ64__generate_parameter_library_py__ubuntu_jammy_amd64__binary)](https://build.ros2.org/job/Hbin_uJ64__generate_parameter_library_py__ubuntu_jammy_amd64__binary/)

@@ -2,6 +2,31 @@
 Changelog for package generate_parameter_library_py
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.4.0 (2026-11-17)
+------------------
+* Escape text in generated C++ and Python code (`#405 <https://github.com/ros-tooling/generate_parameter_library/issues/405>`_)
+* Install parameter definitions to share/<package>/parameter_definitions (`#419 <https://github.com/ros-tooling/generate_parameter_library/issues/419>`_)
+* Report wrong default_value types as definition errors (`#408 <https://github.com/ros-tooling/generate_parameter_library/issues/408>`_)
+* Validator: name nested sequences in array type errors (`#418 <https://github.com/ros-tooling/generate_parameter_library/issues/418>`_)
+* Validator: add --node to check only the node that loads the configs (`#416 <https://github.com/ros-tooling/generate_parameter_library/issues/416>`_)
+* Validator: merge several --config files like the parameter files of one node (`#413 <https://github.com/ros-tooling/generate_parameter_library/issues/413>`_)
+* Recognize a parameter by its type field, not by its first key (`#407 <https://github.com/ros-tooling/generate_parameter_library/issues/407>`_)
+* Remove dead code (`#412 <https://github.com/ros-tooling/generate_parameter_library/issues/412>`_)
+* Accept an output file name without a directory in the generators (`#409 <https://github.com/ros-tooling/generate_parameter_library/issues/409>`_)
+* Load parameter definitions with the safe YAML loader (`#406 <https://github.com/ros-tooling/generate_parameter_library/issues/406>`_)
+* Name the offending element and bound in element bound messages (`#410 <https://github.com/ros-tooling/generate_parameter_library/issues/410>`_)
+* Python install paths: clean up generated modules and extend CI coverage (`#400 <https://github.com/ros-tooling/generate_parameter_library/issues/400>`_)
+* Add a standalone configuration validator (`#312 <https://github.com/ros-tooling/generate_parameter_library/issues/312>`_) (`#388 <https://github.com/ros-tooling/generate_parameter_library/issues/388>`_)
+* Fix python install paths (`#393 <https://github.com/ros-tooling/generate_parameter_library/issues/393>`_)
+* Validate bound validators against parameter types (`#373 <https://github.com/ros-tooling/generate_parameter_library/issues/373>`_)
+* Validate fixed-size parameter defaults (`#374 <https://github.com/ros-tooling/generate_parameter_library/issues/374>`_)
+* Contributors: Christoph Fröhlich, Daniiiil1, Davide Faconti, Marq Rasmussen
+
+1.3.1 (2026-10-05)
+------------------
+* fix that if no parameter is updated, the user callback is not called (`#383 <https://github.com/PickNikRobotics/generate_parameter_library/issues/383>`_)
+* Contributors: Fabian Hirmann
+
 1.3.0 (2026-07-24)
 ------------------
 * Accept quotes in description and additional constraints (`#357 <https://github.com/PickNikRobotics/generate_parameter_library/issues/357>`_)

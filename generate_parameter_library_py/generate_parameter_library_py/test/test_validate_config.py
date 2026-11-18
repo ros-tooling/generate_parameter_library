@@ -1,0 +1,1361 @@
+#!/usr/bin/env python3
+
+# Copyright 2026 PickNik Inc.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#    * Redistributions of source code must retain the above copyright
+#      notice, this list of conditions and the following disclaimer.
+#
+#    * Redistributions in binary form must reproduce the above copyright
+#      notice, this list of conditions and the following disclaimer in the
+#      documentation and/or other materials provided with the distribution.
+#
+#    * Neither the name of the PickNik Inc. nor the names of its
+#      contributors may be used to endorse or promote products derived from
+#      this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+import os
+import tempfile
+
+import pytest
+
+from generate_parameter_library_py.validate_config import ConfigError, main, validate
+
+DEFINITION = """my_node:
+  rate:
+    type: double
+    default_value: 10.0
+    validation:
+      gt<>: [0.0]
+  name:
+    type: string
+    default_value: "robot"
+  mandatory_gain:
+    type: double
+  mode:
+    type: string
+    default_value: "fast"
+    validation:
+      one_of<>: [["fast", "slow"]]
+  joints:
+    type: string_array
+    default_value: ["a", "b"]
+  offsets:
+    type: double_array_fixed_2
+    default_value: [0.0, 0.0]
+  checked_by_cpp:
+    type: int
+    default_value: 3
+    validation:
+      "my_project::integer_equal_value": [3]
+  enabled:
+    type: bool
+    default_value: true
+  background:
+    r:
+      type: int
+      default_value: 0
+      validation:
+        bounds<>: [0, 255]
+"""
+
+BAD_DEFAULT_DEFINITION = """default_node:
+  items:
+    type: string_array
+    default_value: []
+    validation:
+      not_empty<>: null
+  bad_number:
+    type: double
+    default_value: -1.0
+    validation:
+      gt<>: [0.0]
+"""
+
+MAPPED_DEFINITION = """mapped_node:
+  joints:
+    type: string_array
+    default_value: ["shoulder", "elbow"]
+  pid:
+    __map_joints:
+      p:
+        type: double
+        default_value: 1.0
+        validation:
+          gt<>: [0.0]
+"""
+
+
+def write(directory, name, text):
+    path = os.path.join(directory, name)
+    with open(path, 'w') as handle:
+        handle.write(text)
+    return path
+
+
+@pytest.fixture
+def workspace():
+    with tempfile.TemporaryDirectory() as directory:
+        yield directory
+
+
+@pytest.fixture
+def definition(workspace):
+    return write(workspace, 'definition.yaml', DEFINITION)
+
+
+def messages(diagnostics):
+    return [str(diagnostic) for diagnostic in diagnostics]
+
+
+def errors(diagnostics):
+    return [d for d in diagnostics if d.severity == 'ERROR']
+
+
+def test_valid_config_reports_nothing(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 20.0
+    mandatory_gain: 1.5
+    mode: "slow"
+    background:
+      r: 128
+""",
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_missing_mandatory_parameter_is_an_error(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 20.0
+""",
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert 'mandatory_gain' in found[0].location
+    assert 'default_value' in found[0].message
+
+
+def test_integer_for_a_double_is_reported(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 20
+    mandatory_gain: 1.5
+""",
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert 'my_node.rate' == found[0].location
+    assert '20.0' in found[0].message
+
+
+def test_wrong_scalar_type_is_reported(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    rate: "fast"
+    mandatory_gain: 1.5
+""",
+    )
+    found = errors(validate([definition], [config]))
+    assert "expected type 'double', got a quoted 'string'" in found[0].message
+
+
+def test_value_out_of_bounds_is_reported(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+    background:
+      r: 300
+""",
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == 'my_node.background.r'
+
+
+def test_value_outside_one_of_is_reported(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+    mode: "medium"
+""",
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == 'my_node.mode'
+
+
+def test_array_element_type_is_checked(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+    joints: [1, 2]
+""",
+    )
+    found = errors(validate([definition], [config]))
+    assert 'element 0 of the array' in found[0].message
+
+
+@pytest.mark.parametrize(
+    'joints,index',
+    [
+        # rcl_yaml_param_parser loads this as ["a", "b"]
+        ('[["a", "b"]]', 0),
+        # loads as ["a"], dropping "x"
+        ('["x", ["a"]]', 1),
+    ],
+)
+def test_nested_sequence_is_named_as_such(workspace, definition, joints, index):
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n'
+        f'    joints: {joints}\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].message.startswith(
+        f'element {index} of the array is a nested sequence'
+    )
+
+
+def test_fixed_size_array_is_checked(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+    offsets: [0.0, 1.0, 2.0]
+""",
+    )
+    found = errors(validate([definition], [config]))
+    assert 'fixed size of 2' in found[0].message
+
+
+def test_custom_cpp_validator_is_skipped_with_a_warning(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+    checked_by_cpp: 7
+""",
+    )
+    diagnostics = validate([definition], [config])
+    assert errors(diagnostics) == []
+    assert [d.severity for d in diagnostics] == ['WARNING']
+    assert 'my_project::integer_equal_value' in diagnostics[0].message
+
+
+def test_unknown_parameter_is_reported_in_strict_mode_only(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+    background:
+      colour: 1
+""",
+    )
+    assert errors(validate([definition], [config])) == []
+    found = errors(validate([definition], [config], strict=True))
+    assert len(found) == 1
+    assert found[0].location == 'my_node.background.colour'
+    assert "did you mean 'background.r'" in found[0].message
+
+
+def test_defaults_are_reported_in_strict_mode(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+""",
+    )
+    diagnostics = validate([definition], [config], strict=True)
+    assert errors(diagnostics) == []
+    assert any('will use default_value' in str(d) for d in diagnostics)
+
+
+def test_wildcard_node_supplies_values(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """/**:
+  ros__parameters:
+    mandatory_gain: 1.5
+my_node:
+  ros__parameters:
+    rate: 5.0
+""",
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_plain_parameter_tree_without_ros_parameters(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """rate: 20.0
+mandatory_gain: 1.5
+""",
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_mapped_parameters_expand_from_the_config(workspace):
+    definition = write(workspace, 'mapped.yaml', MAPPED_DEFINITION)
+    config = write(
+        workspace,
+        'config.yaml',
+        """mapped_node:
+  ros__parameters:
+    joints: ["shoulder", "wrist"]
+    pid:
+      shoulder:
+        p: 2.0
+      wrist:
+        p: -1.0
+""",
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == 'mapped_node.pid.wrist.p'
+
+
+def test_several_definitions_match_by_namespace(workspace):
+    first = write(workspace, 'first.yaml', DEFINITION)
+    second = write(workspace, 'second.yaml', MAPPED_DEFINITION)
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+mapped_node:
+  ros__parameters:
+    joints: ["shoulder"]
+    pid:
+      shoulder:
+        p: 2.0
+""",
+    )
+    assert validate([first, second], [config]) == []
+
+
+def test_validator_that_raises_is_a_warning(workspace, monkeypatch):
+    """A validator we cannot evaluate must not be reported as a bad value."""
+    from generate_parameter_library_py import validate_config
+
+    def explode(param, *arguments):
+        raise RuntimeError('boom')
+
+    monkeypatch.setattr(
+        validate_config.ParameterValidators, 'gt', explode, raising=True
+    )
+    definition = write(workspace, 'definition.yaml', DEFINITION)
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 20.0
+    mandatory_gain: 1.5
+""",
+    )
+    diagnostics = validate([definition], [config])
+    assert errors(diagnostics) == []
+    assert [d.severity for d in diagnostics] == ['WARNING']
+    assert 'RuntimeError' in diagnostics[0].message
+
+
+def test_unused_definitions_are_reported_and_not_parsed(workspace, definition):
+    """A definition no section refers to is skipped, and the skip is visible."""
+    broken = write(
+        workspace,
+        'broken.yaml',
+        """other_node:
+  bad:
+    type: not_a_real_type
+""",
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+""",
+    )
+    diagnostics = validate([definition, broken], [config])
+    assert errors(diagnostics) == []
+    assert [d.severity for d in diagnostics] == ['WARNING']
+    assert 'broken.yaml' in diagnostics[0].message
+
+
+def test_wildcard_only_config_is_validated(workspace, definition):
+    """A file whose only section is the wildcard still describes a node."""
+    config = write(
+        workspace,
+        'config.yaml',
+        """/**:
+  ros__parameters:
+    rate: -1.0
+    mandatory_gain: 1.5
+""",
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert 'rate' in found[0].location
+
+
+def test_plain_parameter_tree_is_checked_next_to_a_named_config(workspace, definition):
+    """A named config for the node must not stop the plain file from being checked."""
+    plain = write(
+        workspace,
+        'plain.yaml',
+        """rate: -1.0
+mandatory_gain: 1.5
+""",
+    )
+    named = write(
+        workspace,
+        'named.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 20.0
+    mandatory_gain: 1.5
+""",
+    )
+    for configs in ([plain, named], [named, plain]):
+        found = errors(validate([definition], configs))
+        assert [d.location for d in found] == ['rate'], configs
+
+
+def test_config_files_are_merged_in_order(workspace, definition):
+    """Several files are stacked like the parameter files of one node."""
+    common = write(
+        workspace,
+        'common.yaml',
+        """/**:
+  ros__parameters:
+    rate: -1.0
+    mandatory_gain: 1.5
+""",
+    )
+    override = write(
+        workspace,
+        'override.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 20.0
+""",
+    )
+    # mandatory_gain comes from the first file, the second overrides rate
+    assert errors(validate([definition], [common, override])) == []
+    # reversed, the wildcard section of the later file wins over my_node
+    found = errors(validate([definition], [override, common]))
+    assert len(found) == 1
+    assert found[0].location == 'my_node.rate'
+    # each file on its own is incomplete or invalid
+    assert len(errors(validate([definition], [override]))) == 1
+    assert len(errors(validate([definition], [common]))) == 1
+
+
+TWO_NODES = """/**:
+  ros__parameters:
+    rate: 20.0
+first_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+other_node:
+  ros__parameters:
+    rate: -1.0
+"""
+
+
+def test_node_option_checks_only_that_node(workspace, definition):
+    """Sections of other nodes in the same files are left out.
+
+    No section is named after the definition, as for ros2_control controllers.
+    """
+    config = write(workspace, 'config.yaml', TWO_NODES)
+    # without --node, the single definition is also applied to other_node
+    assert errors(validate([definition], [config])) != []
+    assert errors(validate([definition], [config], nodes=['first_node'])) == []
+    found = errors(validate([definition], [config], nodes=['/other_node']))
+    assert sorted(d.location for d in found) == [
+        '/other_node.mandatory_gain',
+        '/other_node.rate',
+    ]
+
+
+def test_node_option_does_not_parse_the_definitions_of_other_nodes(
+    workspace, definition
+):
+    """A broken definition of a node that is not selected must not fail the run."""
+    broken = write(
+        workspace,
+        'broken.yaml',
+        'other_node:\n  bad:\n    type: not_a_real_type\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n'
+        'other_node:\n  ros__parameters:\n    bad: 1\n',
+    )
+    diagnostics = validate([definition, broken], [config], nodes=['my_node'])
+    assert errors(diagnostics) == []
+    assert [d.severity for d in diagnostics] == ['WARNING']
+    assert 'broken.yaml' in diagnostics[0].message
+    assert 'no selected node' in diagnostics[0].message
+
+
+PART_A = """part_a:
+  gain:
+    type: double
+"""
+
+PART_B = """part_b:
+  rate:
+    type: int
+    validation:
+      gt<>: [0]
+"""
+
+COMBINED = """my_node:
+  ros__parameters:
+    gain: 1.5
+    rate: 10
+"""
+
+
+def test_node_option_applies_all_definitions_of_the_node(workspace):
+    """A node that uses several parameter libraries is checked against all of them."""
+    part_a = write(workspace, 'part_a.yaml', PART_A)
+    part_b = write(workspace, 'part_b.yaml', PART_B)
+    config = write(workspace, 'config.yaml', COMBINED)
+    # no definition is named after my_node, so without --node none is applied
+    assert errors(validate([part_a, part_b], [config])) == []
+    assert validate([part_a, part_b], [config], nodes=['my_node']) == []
+    broken = write(workspace, 'broken.yaml', COMBINED.replace('10', '0'))
+    found = errors(validate([part_a, part_b], [broken], nodes=['my_node']))
+    assert [d.location for d in found] == ['my_node.rate']
+
+
+def test_node_option_strict_knows_the_parameters_of_all_definitions(workspace):
+    part_a = write(workspace, 'part_a.yaml', PART_A)
+    part_b = write(workspace, 'part_b.yaml', PART_B)
+    config = write(workspace, 'config.yaml', COMBINED)
+    # with one definition, the parameters of the other are unknown
+    found = errors(validate([part_a], [config], strict=True, nodes=['my_node']))
+    assert [d.location for d in found] == ['my_node.rate']
+    assert (
+        errors(validate([part_a, part_b], [config], strict=True, nodes=['my_node']))
+        == []
+    )
+    typo = write(workspace, 'typo.yaml', COMBINED + '    gian: 1.0\n')
+    found = errors(validate([part_a, part_b], [typo], strict=True, nodes=['my_node']))
+    assert [d.location for d in found] == ['my_node.gian']
+
+
+def test_node_option_leaves_a_definition_to_the_node_it_names(workspace):
+    part_a = write(workspace, 'part_a.yaml', PART_A)
+    other = write(
+        workspace, 'other.yaml', 'other_node:\n  mandatory:\n    type: double\n'
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        COMBINED + 'other_node:\n  ros__parameters:\n    gain: "high"\n',
+    )
+    # part_a names no node, so it applies to both; other.yaml only to other_node
+    found = errors(validate([part_a, other], [config], nodes=['my_node', 'other_node']))
+    assert sorted(d.location for d in found) == [
+        'other_node.gain',
+        'other_node.mandatory',
+    ]
+
+
+def test_node_option_checks_a_parameter_against_every_definition(workspace):
+    """Each library reads the parameter back as its own type, so both must accept it."""
+    part_a = write(workspace, 'part_a.yaml', PART_A)
+    as_int = write(workspace, 'as_int.yaml', 'part_c:\n  gain:\n    type: int\n')
+    config = write(workspace, 'config.yaml', COMBINED)
+    for order in ([part_a, as_int], [as_int, part_a]):
+        found = errors(validate(order, [config], nodes=['my_node']))
+        assert [d.location for d in found] == ['my_node.gain']
+
+
+def test_node_option_runs_the_validators_of_every_definition(workspace):
+    """A later library still validates the value the node holds."""
+    part_a = write(workspace, 'part_a.yaml', PART_A)
+    positive = write(
+        workspace,
+        'positive.yaml',
+        'part_c:\n  gain:\n    type: double\n    validation:\n      gt<>: [0]\n',
+    )
+    config = write(workspace, 'config.yaml', COMBINED.replace('1.5', '-1.0'))
+    found = errors(validate([part_a, positive], [config], nodes=['my_node']))
+    assert [d.location for d in found] == ['my_node.gain']
+
+
+def test_node_option_validates_the_first_default_with_every_definition(workspace):
+    """The node holds the first declaration's default, and every library checks it."""
+    negative = write(
+        workspace,
+        'negative.yaml',
+        'part_a:\n  gain:\n    type: double\n    default_value: -1.0\n',
+    )
+    positive = write(
+        workspace,
+        'positive.yaml',
+        'part_c:\n  gain:\n    type: double\n    default_value: 1.0\n'
+        '    validation:\n      gt<>: [0]\n',
+    )
+    config = write(workspace, 'config.yaml', 'my_node:\n  ros__parameters: {}\n')
+    found = errors(validate([negative, positive], [config], nodes=['my_node']))
+    assert [d.location for d in found] == ['my_node.gain']
+    assert '-1.0' in found[0].message
+    assert errors(validate([positive, negative], [config], nodes=['my_node'])) == []
+
+
+def test_node_option_expands_maps_over_the_first_default(workspace):
+    """A later library maps over the key list the node holds, not its own default."""
+    shoulder = write(
+        workspace,
+        'shoulder.yaml',
+        'part_a:\n  joints:\n    type: string_array\n    default_value: [shoulder]\n',
+    )
+    elbow = write(
+        workspace,
+        'elbow.yaml',
+        'part_c:\n  joints:\n    type: string_array\n    default_value: [elbow]\n'
+        '  pid:\n    __map_joints:\n      p:\n        type: double\n'
+        '        validation:\n          gt<>: [0]\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    pid:\n      shoulder:\n        p: -1.0\n',
+    )
+    found = errors(
+        validate([shoulder, elbow], [config], strict=True, nodes=['my_node'])
+    )
+    assert [d.location for d in found] == ['my_node.pid.shoulder.p']
+    assert 'unknown' not in found[0].message
+
+
+def test_node_option_checks_a_node_that_only_wildcards_apply_to(workspace, definition):
+    """A launched node that no section names still gets the wildcard sections."""
+    config = write(workspace, 'config.yaml', TWO_NODES)
+    found = errors(validate([definition], [config], nodes=['third_node']))
+    assert [d.location for d in found] == ['third_node.mandatory_gain']
+    assert not any(
+        'applies to' in m
+        for m in messages(validate([definition], [config], nodes=['third_node']))
+    )
+
+
+def test_node_option_matches_namespaces(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """robot:
+  arm:
+    my_node:
+      ros__parameters:
+        mandatory_gain: 1.5
+""",
+    )
+    assert validate([definition], [config], nodes=['/robot/arm/my_node']) == []
+    diagnostics = validate([definition], [config], nodes=['my_node'])
+    # /my_node is not /robot/arm/my_node, most likely a misspelled name
+    assert [d.location for d in errors(diagnostics)] == [
+        'my_node',
+        'my_node.mandatory_gain',
+    ]
+    assert 'no configuration section applies' in errors(diagnostics)[0].message
+
+
+def test_empty_node_list_selects_like_no_node_list(workspace, definition):
+    """nodes=[] must not silently skip every named section."""
+    config = write(
+        workspace, 'config.yaml', 'my_node:\n  ros__parameters:\n    rate: -1.0\n'
+    )
+    expected = messages(validate([definition], [config]))
+    assert expected != []
+    assert messages(validate([definition], [config], nodes=[])) == expected
+
+
+def test_node_option_rejects_wildcards(workspace, definition):
+    config = write(workspace, 'config.yaml', TWO_NODES)
+    code = main(['--param-definition', definition, '--config', config, '--node', '/**'])
+    assert code == 1
+
+
+def test_node_option_on_the_command_line(workspace, definition):
+    config = write(workspace, 'config.yaml', TWO_NODES)
+    args = ['--param-definition', definition, '--config', config]
+    assert main(args) == 1
+    assert main(args + ['--node', 'first_node']) == 0
+    assert main(args + ['--node', 'first_node', '--node', 'other_node']) == 1
+
+
+def test_none_typed_parameters_are_left_alone(workspace):
+    """A parameter of type none is declared by other code, not by the node."""
+    definition = write(
+        workspace,
+        'none.yaml',
+        """external_node:
+  some_parameter:
+    type: string
+    default_value: "hello"
+  some_external_parameter:
+    type: none
+""",
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        """external_node:
+  ros__parameters:
+    some_parameter: "hello"
+    some_external_parameter:
+      filter1:
+        type: "LowPass"
+""",
+    )
+    assert validate([definition], [config], strict=True) == []
+
+
+def test_mapped_keys_fall_back_to_the_declared_default(workspace):
+    """The node expands a map over the effective key list, so the tool must."""
+    definition = write(workspace, 'mapped.yaml', MAPPED_DEFINITION)
+    config = write(
+        workspace,
+        'config.yaml',
+        """mapped_node:
+  ros__parameters:
+    pid:
+      shoulder:
+        p: -2.0
+      elbow:
+        p: 3.0
+""",
+    )
+    found = errors(validate([definition], [config], strict=True))
+    assert len(found) == 1
+    assert found[0].location == 'mapped_node.pid.shoulder.p'
+
+
+def test_node_name_with_namespace_or_leading_slash_matches(workspace, definition):
+    """A section may carry a leading slash or a namespace; a definition cannot."""
+    other = write(workspace, 'other.yaml', MAPPED_DEFINITION)
+    shapes = {
+        'leading slash': (
+            '/my_node:\n'
+            '  ros__parameters:\n'
+            '    rate: -5.0\n'
+            '    mandatory_gain: 1.5\n'
+        ),
+        'namespace': (
+            'my_ns:\n'
+            '  my_node:\n'
+            '    ros__parameters:\n'
+            '      rate: -5.0\n'
+            '      mandatory_gain: 1.5\n'
+        ),
+    }
+    for shape, text in shapes.items():
+        config = write(workspace, 'config.yaml', text)
+        found = errors(validate([definition, other], [config]))
+        assert len(found) == 1, shape
+        assert 'rate' in found[0].location, shape
+
+
+def test_built_in_parameters_are_not_unknown(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """/**:
+  ros__parameters:
+    use_sim_time: true
+    mandatory_gain: 1.5
+my_node:
+  ros__parameters:
+    rate: 5.0
+""",
+    )
+    assert errors(validate([definition], [config], strict=True)) == []
+
+
+def test_scientific_notation_is_a_double(workspace, definition):
+    """ROS 2 reads 1e5 as a double even though PyYAML calls it a string."""
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 1e5
+    mandatory_gain: 1e-3
+""",
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_word_that_ros_reads_as_a_bool_is_an_error(workspace, definition):
+    """ROS 2 reads a plain y as a bool, so a string parameter gets a bool."""
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n    name: y\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert 'reads y as a bool' in found[0].message
+
+
+def test_quoted_bool_word_stays_a_string(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n    name: "y"\n',
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_plain_bool_word_is_a_bool(workspace, definition):
+    """ROS 2 reads a plain y as a bool, so a bool parameter accepts it."""
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n    enabled: y\n',
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_quoted_number_is_not_a_double(workspace, definition):
+    """ROS 2 keeps a quoted scalar a string, so the node would reject it."""
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    rate: "2.0"\n    mandatory_gain: 1.5\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == 'my_node.rate'
+    assert 'quoted' in found[0].message
+
+
+def test_quoted_scientific_notation_stays_a_string(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    rate: "1e5"\n    mandatory_gain: 1.5\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == 'my_node.rate'
+
+
+def test_quoted_number_element_is_not_a_double(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n    offsets: ["1.0", "2.0"]\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert 'element 0' in found[0].message
+
+
+def test_invalid_default_is_reported_when_the_parameter_is_omitted(workspace):
+    """The node validates the effective value, which is the default when omitted."""
+    definition = write(workspace, 'definition.yaml', BAD_DEFAULT_DEFINITION)
+    config = write(
+        workspace,
+        'config.yaml',
+        'default_node:\n  ros__parameters: {}\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert {d.location for d in found} == {
+        'default_node.items',
+        'default_node.bad_number',
+    }
+
+
+def test_invalid_default_is_not_reported_when_the_config_sets_the_parameter(workspace):
+    definition = write(workspace, 'definition.yaml', BAD_DEFAULT_DEFINITION)
+    config = write(
+        workspace,
+        'config.yaml',
+        'default_node:\n'
+        '  ros__parameters:\n'
+        '    items: ["a"]\n'
+        '    bad_number: 1.0\n',
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_node_section_is_found_through_nested_namespaces(workspace, definition):
+    """A node may sit under any number of namespace levels."""
+    config = write(
+        workspace,
+        'config.yaml',
+        'robot:\n'
+        '  arm:\n'
+        '    my_node:\n'
+        '      ros__parameters:\n'
+        '        rate: -5.0\n'
+        '        mandatory_gain: 1.5\n',
+    )
+    found = errors(validate([definition], [config], strict=True))
+    assert len(found) == 1
+    assert found[0].location == 'robot/arm/my_node.rate'
+
+
+def test_valid_config_in_a_nested_namespace_reports_nothing(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        'robot:\n'
+        '  arm:\n'
+        '    my_node:\n'
+        '      ros__parameters:\n'
+        '        rate: 20.0\n'
+        '        mandatory_gain: 1.5\n',
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_later_section_wins_over_an_earlier_one(workspace, definition):
+    """rclcpp applies matching sections in file order, wildcard or not."""
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n'
+        '  ros__parameters:\n'
+        '    rate: 20.0\n'
+        '    mandatory_gain: 1.5\n'
+        '/**:\n'
+        '  ros__parameters:\n'
+        '    rate: -1.0\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == 'my_node.rate'
+
+
+def test_single_level_wildcards_match_like_rclcpp(workspace, definition):
+    """/* stands for one level and /** for any number, anywhere in the name."""
+    config = write(
+        workspace,
+        'config.yaml',
+        '/*/arm/*:\n'
+        '  ros__parameters:\n'
+        '    mandatory_gain: 1.5\n'
+        '/**/arm/my_node:\n'
+        '  ros__parameters:\n'
+        '    rate: -1.0\n'
+        '/robot/arm/my_node:\n'
+        '  ros__parameters:\n'
+        '    name: "a"\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert {d.location for d in found} == {
+        '/**/arm/my_node.rate',
+        '/robot/arm/my_node.rate',
+    }
+
+
+def test_single_level_wildcard_does_not_reach_deeper_nodes(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        '/robot/*:\n'
+        '  ros__parameters:\n'
+        '    mandatory_gain: 1.5\n'
+        '/robot/arm/my_node:\n'
+        '  ros__parameters:\n'
+        '    rate: 20.0\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == '/robot/arm/my_node.mandatory_gain'
+
+
+def test_spellings_of_one_node_are_merged(workspace, definition):
+    """/ns/my_node and ns: {my_node: ...} name the same node."""
+    config = write(
+        workspace,
+        'config.yaml',
+        '/ns/my_node:\n'
+        '  ros__parameters:\n'
+        '    mandatory_gain: 1.5\n'
+        'ns:\n'
+        '  my_node:\n'
+        '    ros__parameters:\n'
+        '      rate: -1.0\n',
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert found[0].location == '/ns/my_node.rate'
+
+
+def test_repeated_slash_in_a_node_name_is_rejected(workspace, definition):
+    """rcl_yaml_param_parser refuses /ns: {/my_node: ...} and the whole file."""
+    config = write(
+        workspace,
+        'config.yaml',
+        '/ns:\n  /my_node:\n    ros__parameters:\n      mandatory_gain: 1.5\n',
+    )
+    assert main(['--param-definition', definition, '--config', config]) == 1
+
+
+def test_mixed_array_fails_its_file_even_when_a_later_file_overrides_it(
+    workspace, definition
+):
+    """rcl_yaml_param_parser refuses ["a", 2], so a later file cannot fix it."""
+    mixed = write(
+        workspace,
+        'mixed.yaml',
+        'my_node:\n  ros__parameters:\n    joints: ["a", 2]\n',
+    )
+    good = write(
+        workspace,
+        'good.yaml',
+        'my_node:\n  ros__parameters:\n    joints: ["a", "b"]\n'
+        '    mandatory_gain: 1.5\n',
+    )
+    for configs in ([mixed, good], [good, mixed]):
+        args = ['--param-definition', definition]
+        for config in configs:
+            args += ['--config', config]
+        assert main(args) == 1, configs
+        with pytest.raises(
+            ConfigError, match=r'my_node\.joints \(line 3\) mixes string and int'
+        ):
+            validate([definition], configs)
+
+
+def test_several_nested_sequences_fail_their_file_even_when_overridden(
+    workspace, definition
+):
+    """rcl_yaml_param_parser refuses [["a"], ["b"]], so a later file cannot fix it."""
+    nested = write(
+        workspace,
+        'nested.yaml',
+        'my_node:\n  ros__parameters:\n    joints: [["a"], ["b"]]\n',
+    )
+    good = write(
+        workspace,
+        'good.yaml',
+        'my_node:\n  ros__parameters:\n    joints: ["a", "b"]\n'
+        '    mandatory_gain: 1.5\n',
+    )
+    for configs in ([nested, good], [good, nested]):
+        with pytest.raises(
+            ConfigError, match=r'my_node\.joints \(line 3\) holds 2 nested sequences'
+        ):
+            validate([definition], configs)
+
+
+@pytest.mark.parametrize(
+    'text',
+    [
+        # the same node under two spellings
+        'ns/my_node:\n  ros__parameters:\n    joints: ["a", 2]\n'
+        'ns:\n  my_node:\n    ros__parameters:\n      joints: ["a", "b"]\n',
+        # a repeated key, of which PyYAML keeps only the last value
+        'my_node:\n  ros__parameters:\n    joints: ["a", 2]\n    joints: ["a", "b"]\n',
+        # a repeated node
+        'my_node:\n  ros__parameters:\n    joints: ["a", 2]\n'
+        'my_node:\n  ros__parameters:\n    joints: ["a", "b"]\n',
+    ],
+)
+def test_rejected_sequence_is_found_behind_a_later_duplicate(
+    workspace, definition, text
+):
+    """rcl_yaml_param_parser reads every occurrence, not just the last one."""
+    config = write(workspace, 'config.yaml', text)
+    with pytest.raises(ConfigError, match=r'\(line 3\) mixes string and int'):
+        validate([definition], [config])
+
+
+@pytest.mark.parametrize(
+    'value',
+    # elements that ROS 2 reads as one type, though PyYAML reads some as text
+    ['[1e5, 2.0]', '[y, true]', '[0x10, 2]'],
+)
+def test_sequence_of_one_ros_type_is_accepted(workspace, value):
+    definition = write(
+        workspace,
+        'definition.yaml',
+        'my_node:\n  values:\n    type: none\n',
+    )
+    config = write(
+        workspace, 'config.yaml', f'my_node:\n  ros__parameters:\n    values: {value}\n'
+    )
+    assert errors(validate([definition], [config])) == []
+
+
+@pytest.mark.parametrize(
+    'value,types',
+    [
+        # quoted text stays a string, the unquoted 1e5 is a double
+        ('["1e5", 1e5]', 'string and double'),
+        ('[1, null]', 'int and string'),
+        ('[["a", 2]]', 'string and int'),
+    ],
+)
+def test_sequence_mixing_ros_types_is_rejected(workspace, definition, value, types):
+    config = write(
+        workspace, 'config.yaml', f'my_node:\n  ros__parameters:\n    joints: {value}\n'
+    )
+    with pytest.raises(ConfigError, match=f'mixes {types} elements'):
+        validate([definition], [config])
+
+
+def test_definition_may_mix_int_and_double_in_a_sequence(workspace, definition):
+    """Only configs are read by rcl_yaml_param_parser, definitions are not."""
+    other = write(
+        workspace,
+        'other.yaml',
+        'other_node:\n  rate:\n    type: double\n    default_value: 1.0\n'
+        '    validation:\n      bounds<>: [0, 1.5]\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n'
+        'other_node:\n  ros__parameters:\n    rate: 1.0\n',
+    )
+    assert errors(validate([definition, other], [config])) == []
+
+
+def test_bool_word_in_a_default_is_a_string(workspace):
+    """A default_value is compiled into the node, not parsed as config text."""
+    definition = write(
+        workspace,
+        'definition.yaml',
+        'default_node:\n'
+        '  axes:\n'
+        '    type: string_array\n'
+        '    default_value: ["x", "y", "rz"]\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'default_node:\n  ros__parameters: {}\n',
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_empty_default_array_is_not_reported(workspace):
+    """An empty default is compiled into the node, rcl never reads it."""
+    definition = write(
+        workspace,
+        'definition.yaml',
+        'default_node:\n'
+        '  joints:\n'
+        '    type: string_array\n'
+        '    default_value: []\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'default_node:\n  ros__parameters: {}\n',
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_integer_default_for_a_double_is_not_reported(workspace):
+    """The generator converts an integer default_value of a double to 1.0."""
+    definition = write(
+        workspace,
+        'definition.yaml',
+        'default_node:\n'
+        '  rate:\n'
+        '    type: double\n'
+        '    default_value: 1\n'
+        '    validation:\n'
+        '      gt<>: [0.0]\n'
+        '  gains:\n'
+        '    type: double_array\n'
+        '    default_value: [1, 2]\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'default_node:\n  ros__parameters: {}\n',
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_block_scalar_is_read_like_a_plain_scalar(workspace, definition):
+    """rcl_yaml_param_parser only keeps single and double quoted scalars as text."""
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    rate: >-\n      2.0\n    mandatory_gain: 1.5\n',
+    )
+    assert validate([definition], [config]) == []
+
+
+def test_empty_array_is_reported(workspace, definition):
+    """ROS 2 cannot type an empty sequence and leaves the parameter unset."""
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+    joints: []
+""",
+    )
+    found = errors(validate([definition], [config]))
+    assert len(found) == 1
+    assert 'PARAMETER_NOT_SET' in found[0].message
+
+
+def test_duplicate_namespace_is_reported(workspace, definition):
+    twin = write(
+        workspace,
+        'twin.yaml',
+        """my_node:
+  something_else:
+    type: int
+    default_value: 1
+""",
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+""",
+    )
+    found = errors(validate([definition, twin], [config]))
+    assert any('declared by both' in d.message for d in found)
+
+
+def test_one_definition_does_not_claim_unrelated_sections(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+some_other_node:
+  ros__parameters:
+    completely: "different"
+""",
+    )
+    diagnostics = validate([definition], [config])
+    assert errors(diagnostics) == []
+    assert any('not checked' in d.message for d in diagnostics)
+
+
+def test_missing_file_is_reported_without_a_traceback(workspace, definition):
+    code = main(['--param-definition', definition, '--config', '/no/such/config.yaml'])
+    assert code == 1
+
+
+def test_main_returns_non_zero_on_error(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    rate: "fast"
+    mandatory_gain: 1.5
+""",
+    )
+    code = main(['--param-definition', definition, '--config', config])
+    assert code == 1
+
+
+def test_main_returns_zero_on_success(workspace, definition):
+    config = write(
+        workspace,
+        'config.yaml',
+        """my_node:
+  ros__parameters:
+    mandatory_gain: 1.5
+""",
+    )
+    assert main(['--param-definition', definition, '--config', config]) == 0
+
+
+@pytest.mark.parametrize(
+    'parameters, line',
+    [
+        ('    joints: &loop [*loop]\n', 3),
+        ('    pid: &loop\n      inner: *loop\n', 4),
+        ('    joints: &shared [a, b]\n    names: *shared\n', 4),
+        ('    base: &base {p: 1.0}\n    pid:\n      <<: *base\n', 5),
+    ],
+    ids=['recursive_sequence', 'recursive_mapping', 'shared', 'merge_key'],
+)
+def test_alias_fails_its_file(workspace, definition, parameters, line):
+    """rcl_yaml_param_parser rejects any alias, which also rules out a cycle."""
+    config = write(
+        workspace, 'alias.yaml', 'my_node:\n  ros__parameters:\n' + parameters
+    )
+    with pytest.raises(ConfigError, match=f'alias.*line {line}'):
+        validate([definition], [config])
+
+
+def test_alias_in_a_definition_is_allowed(workspace):
+    """A definition is read by PyYAML only, which resolves aliases."""
+    aliased = write(
+        workspace,
+        'aliased.yaml',
+        'my_node:\n  gain: &gain\n    type: double\n    default_value: 1.0\n'
+        '  other_gain: *gain\n',
+    )
+    config = write(workspace, 'config.yaml', 'my_node:\n  ros__parameters: {}\n')
+    assert errors(validate([aliased], [config])) == []
