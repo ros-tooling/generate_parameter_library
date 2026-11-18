@@ -29,3 +29,35 @@ jobs:
       ros_repo: testing
       upstream_workspace: generate_parameter_library.${{ matrix.ROS_DISTRO }}.repos
       ref_for_scheduled_build: main
+
+  validate-config:
+    name: Validate config files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install generate_parameter_library_py
+        run: pip install ./generate_parameter_library_py
+      - name: Validate example configs against their parameter definitions
+        run: |
+          generate_parameter_library_validate \
+            --param-definition example/src/parameters.yaml \
+            --config example/config/implementation.yaml \
+            --config example_external/config/implementation.yaml
+          generate_parameter_library_validate \
+            --param-definition example_python/generate_parameter_module_example/parameters.yaml \
+            --config example_python/config/implementation.yaml
+          generate_parameter_library_validate \
+            --param-definition example_cmake_python/cmake_generate_parameter_module_example/parameters.yaml \
+            --config example_cmake_python/config/implementation.yaml
+      - name: Incomplete example configs must fail validation
+        run: |
+          ! generate_parameter_library_validate \
+            --param-definition example/src/parameters.yaml \
+            --config example/config/missing_required.yaml \
+            --config example_external/config/missing_required.yaml
+          ! generate_parameter_library_validate \
+            --param-definition example_python/generate_parameter_module_example/parameters.yaml \
+            --config example_python/config/missing_required.yaml
+          ! generate_parameter_library_validate \
+            --param-definition example_cmake_python/cmake_generate_parameter_module_example/parameters.yaml \
+            --config example_cmake_python/config/missing_required.yaml

@@ -1,9 +1,1 @@
-admittance_controller:
-  ros__parameters:
-      mass:
-        - -10.0 # x
-        - -10.0 # y
-        - 3.0 # z
-        - 0.05 # rx
-        - 0.05 # ry
-        - 0.05 # rz
+../../example_python/config/missing_required.yaml
