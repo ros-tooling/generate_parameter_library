@@ -99,6 +99,25 @@ class ConfigLoader(yaml.SafeLoader):
 ConfigLoader.add_constructor('tag:yaml.org,2002:str', _construct_scalar_text)
 
 
+class ParameterFileLoader(ConfigLoader):
+    """A ConfigLoader that rejects aliases, as rcl_yaml_param_parser does.
+
+    Stopping at the alias event also keeps a recursive one such as
+    `&loop [*loop]` from reaching the recursive checks.
+    """
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise yaml.composer.ComposerError(
+                None,
+                None,
+                'rcl_yaml_param_parser does not support aliases and rejects the '
+                'whole file',
+                self.peek_event().start_mark,
+            )
+        return super().compose_node(parent, index)
+
+
 @dataclass
 class Diagnostic:
     """One finding, printed as a single line."""
@@ -562,31 +581,31 @@ def stand_in_node(section: str) -> str:
 
 
 def effective_sections(
-    sections: Dict[str, Dict[str, Any]],
-) -> List[Tuple[str, Dict[str, Any]]]:
-    """Return the values each node described by a file receives at runtime.
+    sections: List[Tuple[str, str, Dict[str, Any]]],
+) -> List[Tuple[str, str, Dict[str, Any]]]:
+    """Return the values each node described by the files receives at runtime.
 
+    `sections` holds the (file, name, parameters) of every section of every
+    configuration file, in the order the files are given and then file order.
     rclcpp applies every section whose name matches the node, wildcard or not,
-    in file order, so a later section wins over an earlier one. A section whose
-    node name is a wildcard describes no node of its own; it is only validated
-    when the file has no other section, the usual shape when the node name is
-    not pinned. Sections that name the same node, such as `/ns/ctrl` and
-    `ns: {ctrl: ...}`, are validated once.
+    in that order, so a later section, also one of a later file, wins over an
+    earlier one. A section whose node name is a wildcard describes no node of
+    its own; it is only validated when no file names a node, the usual shape
+    when the node name is not pinned. Sections that name the same node, such
+    as `/ns/ctrl` and `ns: {ctrl: ...}`, are validated once, reported at the
+    first file that names it.
     """
-    if '' in sections:
-        return [('', flatten(sections['']))]
-    names = list(sections)
-    nodes = [name for name in names if not is_wildcard_node(name)] or names
-    targets: Dict[str, str] = {}
-    for name in nodes:
-        targets.setdefault(stand_in_node(name), name)
+    nodes = [s for s in sections if not is_wildcard_node(s[1])] or sections
+    targets: Dict[str, Tuple[str, str]] = {}
+    for path, name, _ in nodes:
+        targets.setdefault(stand_in_node(name), (path, name))
     effective = []
-    for node_fqn, name in targets.items():
+    for node_fqn, (path, name) in targets.items():
         values: Dict[str, Any] = {}
-        for other in names:
+        for _, other, tree in sections:
             if section_matches(other, node_fqn):
-                values.update(flatten(sections[other]))
-        effective.append((name, values))
+                values.update(flatten(tree))
+        effective.append((path, name, values))
     return effective
 
 
@@ -695,15 +714,85 @@ class ConfigError(Exception):
     """A file could not be read or parsed, reported without a traceback."""
 
 
-def load_yaml(path: str) -> Dict:
+def rcl_scalar_type(node: yaml.ScalarNode) -> str:
+    """Name the type rcl_yaml_param_parser gives a scalar in a sequence."""
+    if node.style in QUOTED_STYLES:
+        return 'string'
+    resolved = {
+        'tag:yaml.org,2002:bool': 'bool',
+        'tag:yaml.org,2002:int': 'int',
+        'tag:yaml.org,2002:float': 'double',
+    }.get(node.tag)
+    if resolved:
+        return resolved
+    # PyYAML leaves y, n and numbers like 1e5 as text, ROS 2 does not
+    if reads_as_bool(node.value):
+        return 'bool'
+    if reads_as_number(node.value, 'int'):
+        return 'int'
+    if reads_as_number(node.value, 'double'):
+        return 'double'
+    return 'string'
+
+
+def check_sequences(node: yaml.Node, keys: Tuple[str, ...] = ()) -> None:
+    """Raise ConfigError for a sequence that makes rcl_yaml_param_parser reject the file.
+
+    It rejects a sequence that mixes element types and one that holds two or
+    more nested sequences. The check runs on the YAML nodes, before PyYAML
+    builds mappings, because rcl_yaml_param_parser reads every occurrence of a
+    repeated key or node, while PyYAML and the merging keep only the last one.
+    """
+    if isinstance(node, yaml.MappingNode):
+        for key, value in node.value:
+            check_sequences(value, keys + (str(key.value),))
+        return
+    if not isinstance(node, yaml.SequenceNode):
+        return
+    name = '.'.join(k for k in keys if k != ROS_PARAMETERS_KEY)
+    where = f'{name} (line {node.start_mark.line + 1})'
+    nested = [child for child in node.value if isinstance(child, yaml.SequenceNode)]
+    if len(nested) > 1:
+        raise ConfigError(
+            f'{where} holds {len(nested)} nested sequences, '
+            f'rcl_yaml_param_parser rejects the whole file'
+        )
+    scalar_types = list(
+        dict.fromkeys(
+            rcl_scalar_type(child)
+            for child in node.value
+            if isinstance(child, yaml.ScalarNode)
+        )
+    )
+    if len(scalar_types) > 1:
+        raise ConfigError(
+            f'{where} mixes {" and ".join(scalar_types)} elements, '
+            f'rcl_yaml_param_parser rejects the whole file'
+        )
+    for child in nested:
+        check_sequences(child, keys)
+
+
+def load_yaml(path: str, is_config: bool = False) -> Dict:
+    """Load a YAML mapping; for a config, also apply the checks of check_sequences."""
     try:
         with open(path) as handle:
             # The custom loader remembers which scalars were quoted, which is
             # what decides the type ROS 2 gives them at runtime.
-            document = yaml.load(handle, Loader=ConfigLoader)
+            loader = (ParameterFileLoader if is_config else ConfigLoader)(handle)
+            try:
+                root = loader.get_single_node()
+                # a definition is never read by rcl_yaml_param_parser
+                if is_config and root is not None:
+                    check_sequences(root)
+                document = None if root is None else loader.construct_document(root)
+            finally:
+                loader.dispose()
     except OSError as error:
         raise ConfigError(f'{path}: {error.strerror or error}')
     except yaml.YAMLError as error:
+        raise ConfigError(f'{path}: {error}')
+    except ConfigError as error:
         raise ConfigError(f'{path}: {error}')
     if document is None:
         return {}
@@ -714,7 +803,7 @@ def load_yaml(path: str) -> Dict:
 
 def read_config(path: str) -> Dict[str, Dict[str, Any]]:
     """Load a configuration file and split it into its node sections."""
-    document = load_yaml(path)
+    document = load_yaml(path, is_config=True)
     try:
         return node_sections(document)
     except ConfigError as error:
@@ -736,7 +825,13 @@ def validate(
     config_paths: List[str],
     strict: bool = False,
 ) -> List[Diagnostic]:
-    """Validate every config against the definitions whose namespace matches."""
+    """Validate the configs against the definitions whose namespace matches.
+
+    The configs are merged in the given order, as the parameter files of one
+    node are by rclcpp, so a later file overrides an earlier one. A file
+    without any `ros__parameters` key holds no node name and is validated on
+    its own.
+    """
     diagnostics = []
     configs = [(path, read_config(path)) for path in config_paths]
     used = {node_name_of(name) for _, sections in configs for name in sections}
@@ -758,27 +853,32 @@ def validate(
             )
         )
 
-    for config_path, sections in configs:
-        nodes = effective_sections(sections)
-        matched = any(node_name_of(name) in definitions for name, _ in nodes)
-        for section_name, values in nodes:
-            node_name = node_name_of(section_name)
-            if node_name in definitions:
-                generator = definitions[node_name]
-            elif single_definition and not matched:
-                generator = next(iter(definitions.values()))
-            else:
-                diagnostics.append(
-                    Diagnostic(
-                        WARNING,
-                        f'{config_path}:{section_name}',
-                        'no parameter definition has this namespace, not checked',
-                    )
+    plain = [(path, '', flatten(s[''])) for path, s in configs if '' in s]
+    named = [
+        (path, name, tree)
+        for path, sections in configs
+        if '' not in sections
+        for name, tree in sections.items()
+    ]
+    nodes = plain + effective_sections(named)
+    matched = any(node_name_of(name) in definitions for _, name, _ in nodes)
+    for config_path, section_name, values in nodes:
+        node_name = node_name_of(section_name)
+        if node_name in definitions:
+            generator = definitions[node_name]
+        # a plain file names no node, so a match in another file says nothing about it
+        elif single_definition and (section_name == '' or not matched):
+            generator = next(iter(definitions.values()))
+        else:
+            diagnostics.append(
+                Diagnostic(
+                    WARNING,
+                    f'{config_path}:{section_name}',
+                    'no parameter definition has this namespace, not checked',
                 )
-                continue
-            diagnostics.extend(
-                validate_section(section_name, generator, values, strict)
             )
+            continue
+        diagnostics.extend(validate_section(section_name, generator, values, strict))
     return diagnostics
 
 
@@ -802,7 +902,8 @@ def parse_args(argv=None):
         required=True,
         metavar='FILE',
         help='a parameter configuration YAML to validate, may be given more '
-        'than once',
+        'than once; the files are merged in the given order, a later file '
+        'overrides an earlier one',
     )
     parser.add_argument(
         '--strict',

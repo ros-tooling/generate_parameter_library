@@ -33,7 +33,7 @@ import tempfile
 
 import pytest
 
-from generate_parameter_library_py.validate_config import main, validate
+from generate_parameter_library_py.validate_config import ConfigError, main, validate
 
 DEFINITION = """my_node:
   rate:
@@ -225,11 +225,11 @@ def test_array_element_type_is_checked(workspace, definition):
         """my_node:
   ros__parameters:
     mandatory_gain: 1.5
-    joints: ["a", 2]
+    joints: [1, 2]
 """,
     )
     found = errors(validate([definition], [config]))
-    assert 'element 1 of the array' in found[0].message
+    assert 'element 0 of the array' in found[0].message
 
 
 def test_fixed_size_array_is_checked(workspace, definition):
@@ -426,6 +426,59 @@ def test_wildcard_only_config_is_validated(workspace, definition):
     assert 'rate' in found[0].location
 
 
+def test_plain_parameter_tree_is_checked_next_to_a_named_config(workspace, definition):
+    """A named config for the node must not stop the plain file from being checked."""
+    plain = write(
+        workspace,
+        'plain.yaml',
+        """rate: -1.0
+mandatory_gain: 1.5
+""",
+    )
+    named = write(
+        workspace,
+        'named.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 20.0
+    mandatory_gain: 1.5
+""",
+    )
+    for configs in ([plain, named], [named, plain]):
+        found = errors(validate([definition], configs))
+        assert [d.location for d in found] == ['rate'], configs
+
+
+def test_config_files_are_merged_in_order(workspace, definition):
+    """Several files are stacked like the parameter files of one node."""
+    common = write(
+        workspace,
+        'common.yaml',
+        """/**:
+  ros__parameters:
+    rate: -1.0
+    mandatory_gain: 1.5
+""",
+    )
+    override = write(
+        workspace,
+        'override.yaml',
+        """my_node:
+  ros__parameters:
+    rate: 20.0
+""",
+    )
+    # mandatory_gain comes from the first file, the second overrides rate
+    assert errors(validate([definition], [common, override])) == []
+    # reversed, the wildcard section of the later file wins over my_node
+    found = errors(validate([definition], [override, common]))
+    assert len(found) == 1
+    assert found[0].location == 'my_node.rate'
+    # each file on its own is incomplete or invalid
+    assert len(errors(validate([definition], [override]))) == 1
+    assert len(errors(validate([definition], [common]))) == 1
+
+
 def test_none_typed_parameters_are_left_alone(workspace):
     """A parameter of type none is declared by other code, not by the node."""
     definition = write(
@@ -587,7 +640,7 @@ def test_quoted_number_element_is_not_a_double(workspace, definition):
     config = write(
         workspace,
         'config.yaml',
-        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n    offsets: ["1.0", 2.0]\n',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n    offsets: ["1.0", "2.0"]\n',
     )
     found = errors(validate([definition], [config]))
     assert len(found) == 1
@@ -735,6 +788,127 @@ def test_repeated_slash_in_a_node_name_is_rejected(workspace, definition):
         '/ns:\n  /my_node:\n    ros__parameters:\n      mandatory_gain: 1.5\n',
     )
     assert main(['--param-definition', definition, '--config', config]) == 1
+
+
+def test_mixed_array_fails_its_file_even_when_a_later_file_overrides_it(
+    workspace, definition
+):
+    """rcl_yaml_param_parser refuses ["a", 2], so a later file cannot fix it."""
+    mixed = write(
+        workspace,
+        'mixed.yaml',
+        'my_node:\n  ros__parameters:\n    joints: ["a", 2]\n',
+    )
+    good = write(
+        workspace,
+        'good.yaml',
+        'my_node:\n  ros__parameters:\n    joints: ["a", "b"]\n'
+        '    mandatory_gain: 1.5\n',
+    )
+    for configs in ([mixed, good], [good, mixed]):
+        args = ['--param-definition', definition]
+        for config in configs:
+            args += ['--config', config]
+        assert main(args) == 1, configs
+        with pytest.raises(
+            ConfigError, match=r'my_node\.joints \(line 3\) mixes string and int'
+        ):
+            validate([definition], configs)
+
+
+def test_several_nested_sequences_fail_their_file_even_when_overridden(
+    workspace, definition
+):
+    """rcl_yaml_param_parser refuses [["a"], ["b"]], so a later file cannot fix it."""
+    nested = write(
+        workspace,
+        'nested.yaml',
+        'my_node:\n  ros__parameters:\n    joints: [["a"], ["b"]]\n',
+    )
+    good = write(
+        workspace,
+        'good.yaml',
+        'my_node:\n  ros__parameters:\n    joints: ["a", "b"]\n'
+        '    mandatory_gain: 1.5\n',
+    )
+    for configs in ([nested, good], [good, nested]):
+        with pytest.raises(
+            ConfigError, match=r'my_node\.joints \(line 3\) holds 2 nested sequences'
+        ):
+            validate([definition], configs)
+
+
+@pytest.mark.parametrize(
+    'text',
+    [
+        # the same node under two spellings
+        'ns/my_node:\n  ros__parameters:\n    joints: ["a", 2]\n'
+        'ns:\n  my_node:\n    ros__parameters:\n      joints: ["a", "b"]\n',
+        # a repeated key, of which PyYAML keeps only the last value
+        'my_node:\n  ros__parameters:\n    joints: ["a", 2]\n    joints: ["a", "b"]\n',
+        # a repeated node
+        'my_node:\n  ros__parameters:\n    joints: ["a", 2]\n'
+        'my_node:\n  ros__parameters:\n    joints: ["a", "b"]\n',
+    ],
+)
+def test_rejected_sequence_is_found_behind_a_later_duplicate(
+    workspace, definition, text
+):
+    """rcl_yaml_param_parser reads every occurrence, not just the last one."""
+    config = write(workspace, 'config.yaml', text)
+    with pytest.raises(ConfigError, match=r'\(line 3\) mixes string and int'):
+        validate([definition], [config])
+
+
+@pytest.mark.parametrize(
+    'value',
+    # elements that ROS 2 reads as one type, though PyYAML reads some as text
+    ['[1e5, 2.0]', '[y, true]', '[0x10, 2]'],
+)
+def test_sequence_of_one_ros_type_is_accepted(workspace, value):
+    definition = write(
+        workspace,
+        'definition.yaml',
+        'my_node:\n  values:\n    type: none\n',
+    )
+    config = write(
+        workspace, 'config.yaml', f'my_node:\n  ros__parameters:\n    values: {value}\n'
+    )
+    assert errors(validate([definition], [config])) == []
+
+
+@pytest.mark.parametrize(
+    'value,types',
+    [
+        # quoted text stays a string, the unquoted 1e5 is a double
+        ('["1e5", 1e5]', 'string and double'),
+        ('[1, null]', 'int and string'),
+        ('[["a", 2]]', 'string and int'),
+    ],
+)
+def test_sequence_mixing_ros_types_is_rejected(workspace, definition, value, types):
+    config = write(
+        workspace, 'config.yaml', f'my_node:\n  ros__parameters:\n    joints: {value}\n'
+    )
+    with pytest.raises(ConfigError, match=f'mixes {types} elements'):
+        validate([definition], [config])
+
+
+def test_definition_may_mix_int_and_double_in_a_sequence(workspace, definition):
+    """Only configs are read by rcl_yaml_param_parser, definitions are not."""
+    other = write(
+        workspace,
+        'other.yaml',
+        'other_node:\n  rate:\n    type: double\n    default_value: 1.0\n'
+        '    validation:\n      bounds<>: [0, 1.5]\n',
+    )
+    config = write(
+        workspace,
+        'config.yaml',
+        'my_node:\n  ros__parameters:\n    mandatory_gain: 1.5\n'
+        'other_node:\n  ros__parameters:\n    rate: 1.0\n',
+    )
+    assert errors(validate([definition, other], [config])) == []
 
 
 def test_bool_word_in_a_default_is_a_string(workspace):
@@ -890,3 +1064,34 @@ def test_main_returns_zero_on_success(workspace, definition):
 """,
     )
     assert main(['--param-definition', definition, '--config', config]) == 0
+
+
+@pytest.mark.parametrize(
+    'parameters, line',
+    [
+        ('    joints: &loop [*loop]\n', 3),
+        ('    pid: &loop\n      inner: *loop\n', 4),
+        ('    joints: &shared [a, b]\n    names: *shared\n', 4),
+        ('    base: &base {p: 1.0}\n    pid:\n      <<: *base\n', 5),
+    ],
+    ids=['recursive_sequence', 'recursive_mapping', 'shared', 'merge_key'],
+)
+def test_alias_fails_its_file(workspace, definition, parameters, line):
+    """rcl_yaml_param_parser rejects any alias, which also rules out a cycle."""
+    config = write(
+        workspace, 'alias.yaml', 'my_node:\n  ros__parameters:\n' + parameters
+    )
+    with pytest.raises(ConfigError, match=f'alias.*line {line}'):
+        validate([definition], [config])
+
+
+def test_alias_in_a_definition_is_allowed(workspace):
+    """A definition is read by PyYAML only, which resolves aliases."""
+    aliased = write(
+        workspace,
+        'aliased.yaml',
+        'my_node:\n  gain: &gain\n    type: double\n    default_value: 1.0\n'
+        '  other_gain: *gain\n',
+    )
+    config = write(workspace, 'config.yaml', 'my_node:\n  ros__parameters: {}\n')
+    assert errors(validate([aliased], [config])) == []
