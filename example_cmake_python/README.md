@@ -5,7 +5,7 @@
 ```
  mkdir -p colcon_ws/src
  cd colcon_ws/src
- git clone https://github.com/picknikrobotics/generate_parameter_library.git
+ git clone https://github.com/ros-tooling/generate_parameter_library.git
  cd ..
  colcon build
 ```
