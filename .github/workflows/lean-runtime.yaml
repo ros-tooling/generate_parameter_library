@@ -1,0 +1,110 @@
+name: Lean Runtime
+
+# Builds the examples, then runs them in a fresh container that only has the exec
+# dependencies of the runtime packages and the examples. Fails if generated code
+# needs the generator at runtime or a runtime package misses a dependency.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  # cancel previous runs of the same workflow, except for pushes on given branches
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads') }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        ROS_DISTRO: [humble, rolling]
+    runs-on: ubuntu-latest
+    container: ros:${{ matrix.ROS_DISTRO }}-ros-base
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+
+      - name: rosdep install
+        run: |
+          apt-get update
+          rosdep update
+          rosdep install --from-paths src --ignore-src -y
+
+      - name: colcon build
+        shell: bash
+        run: |
+          source /opt/ros/${{ matrix.ROS_DISTRO }}/setup.bash
+          colcon build --packages-up-to \
+            generate_parameter_library_example \
+            generate_parameter_module_example \
+            cmake_generate_parameter_module_example
+
+      # tar keeps the executable bits that upload-artifact drops
+      - name: Pack the install space without the generator
+        run: |
+          tar czf install.tgz \
+            --exclude=install/generate_parameter_library \
+            --exclude=install/generate_parameter_library_py \
+            install
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: install-${{ matrix.ROS_DISTRO }}
+          path: install.tgz
+
+  run:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        ROS_DISTRO: [humble, rolling]
+    runs-on: ubuntu-latest
+    # ros-core instead of ros-base: no build tools or dev packages that could hide a missing dependency
+    container: ros:${{ matrix.ROS_DISTRO }}-ros-core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: install-${{ matrix.ROS_DISTRO }}
+
+      - name: Install only exec dependencies
+        run: |
+          tar xzf install.tgz
+          apt-get update
+          apt-get install -y python3-rosdep
+          rosdep init
+          rosdep update
+          rosdep install --ignore-src -y --dependency-types exec --from-paths \
+            src/generate_parameter_library_runtime_cpp \
+            src/generate_parameter_library_runtime_py \
+            src/example \
+            src/example_python \
+            src/example_cmake_python
+
+      - name: The generator is not installed
+        # explicit if: set -e ignores a failing command negated with !
+        run: |
+          if python3 -c 'import generate_parameter_library_py'; then exit 1; fi
+          test ! -e /opt/ros/${{ matrix.ROS_DISTRO }}/share/generate_parameter_library
+
+      - name: Run the examples
+        shell: bash
+        run: |
+          source install/setup.bash
+          # A node that starts and keeps running is stopped by timeout (exit code 124).
+          run() { timeout 5 "$@" || [ $? -eq 124 ]; }
+          run ros2 run generate_parameter_library_example test_node \
+            --ros-args --params-file src/example/config/implementation.yaml
+          run ros2 run generate_parameter_module_example test_node \
+            --ros-args --params-file src/example_python/config/implementation.yaml
+          python3 -c 'import cmake_generate_parameter_module_example.admittance_parameters'
