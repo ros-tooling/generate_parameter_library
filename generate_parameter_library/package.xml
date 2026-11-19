@@ -19,7 +19,6 @@
 
   <depend>fmt</depend>
   <depend>rclcpp</depend>
-  <depend>rclpy</depend>
   <depend>rclcpp_lifecycle</depend>
   <depend>rsl</depend>
   <depend>tcb_span</depend>
