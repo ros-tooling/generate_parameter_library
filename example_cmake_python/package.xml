@@ -12,7 +12,8 @@
   <license>BSD-3-Clause</license>
   <author email="paul.gesel@picknik.ai">Paul Gesel</author>
 
-  <depend>generate_parameter_library</depend>
+  <build_depend>generate_parameter_library</build_depend>
+  <exec_depend>generate_parameter_library_runtime_py</exec_depend>
   <depend>rclpy</depend>
 
   <buildtool_depend>ament_cmake_python</buildtool_depend>

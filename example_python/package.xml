@@ -11,11 +11,12 @@
   <maintainer email="paulgesel@gmail.com">paul</maintainer>
   <license>BSD-3-Clause</license>
 
-  <depend>generate_parameter_library</depend>
-  <depend>generate_parameter_library_py</depend>
+  <build_depend>generate_parameter_library_py</build_depend>
+  <exec_depend>generate_parameter_library_runtime_py</exec_depend>
   <depend>rclpy</depend>
 
   <test_depend>ament_index_python</test_depend>
+  <test_depend>generate_parameter_library_py</test_depend>
   <test_depend>python3-pytest</test_depend>
 
   <export>
