@@ -17,12 +17,11 @@
 
   <buildtool_export_depend>generate_parameter_library_py</buildtool_export_depend>
 
-  <depend>fmt</depend>
-  <depend>rclcpp</depend>
-  <depend>rclcpp_lifecycle</depend>
-  <depend>rsl</depend>
-  <depend>tcb_span</depend>
-  <depend>libexpected-dev</depend>
+  <!-- Packages that use generate_parameter_library as a plain <depend> keep getting
+       the runtime packages; see the README for keeping the generator off the target. -->
+  <build_export_depend>generate_parameter_library_runtime_cpp</build_export_depend>
+  <exec_depend>generate_parameter_library_runtime_cpp</exec_depend>
+  <exec_depend>generate_parameter_library_runtime_py</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
