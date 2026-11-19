@@ -22,8 +22,8 @@ descriptor.additional_constraints = "{{parameter_additional_constraints|valid_st
 {%- endfor %}
 {%- if range.lower is not none or range.upper is not none %}
 descriptor.floating_point_range.append(FloatingPointRange())
-descriptor.floating_point_range[-1].from_value = {{range.lower if range.lower is not none else "-float('inf')"}}
-descriptor.floating_point_range[-1].to_value = {{range.upper if range.upper is not none else "float('inf')"}}
+descriptor.floating_point_range[-1].from_value = float({{range.lower if range.lower is not none else "'-inf'"}})
+descriptor.floating_point_range[-1].to_value = float({{range.upper if range.upper is not none else "'inf'"}})
 {%- endif %}
 {%- elif "INTEGER" in parameter_type %}
 {%- set range = namespace(lower=None, upper=None) %}
