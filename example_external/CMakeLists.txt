@@ -12,7 +12,6 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
-find_package(rclpy REQUIRED)
 find_package(generate_parameter_library_example REQUIRED)
 
 add_library(minimal_publisher_external SHARED
