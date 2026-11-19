@@ -16,7 +16,7 @@
 
 from types import SimpleNamespace
 
-from generate_parameter_library_py.python_validators import ParameterValidators
+from generate_parameter_library_runtime_py.python_validators import ParameterValidators
 
 
 def param(value):
