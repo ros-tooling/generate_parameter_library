@@ -22,7 +22,6 @@
 #include <fmt/ranges.h>
 
 #include <rsl/static_string.hpp>
-#include <rsl/static_vector.hpp>
 #include <rsl/parameter_validators.hpp>
 
 {% if user_validation_file|length -%}
@@ -60,8 +59,8 @@ template <size_t capacity>
 }
 
 template <typename T, size_t capacity>
-[[nodiscard]] auto to_parameter_value(rsl::StaticVector<T, capacity> const& value) {
-    return rclcpp::ParameterValue(rsl::to_vector(value));
+[[nodiscard]] auto to_parameter_value(std::array<T, capacity> const& value) {
+    return rclcpp::ParameterValue(std::vector<T>{value.begin(), value.end()});
 }
 
 {%- filter indent(width=4) %}
