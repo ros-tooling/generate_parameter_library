@@ -92,10 +92,13 @@ jobs:
             src/example_cmake_python
 
       - name: The generator is not installed
-        # explicit if: set -e ignores a failing command negated with !
+        # sourced like the examples, so a generator in /opt/ros or the install space is found
+        shell: bash
         run: |
-          if python3 -c 'import generate_parameter_library_py'; then exit 1; fi
-          test ! -e /opt/ros/${{ matrix.ROS_DISTRO }}/share/generate_parameter_library
+          source install/setup.bash
+          for p in generate_parameter_library generate_parameter_library_py; do
+            if ros2 pkg prefix "$p" >/dev/null 2>&1; then echo "$p is installed"; exit 1; fi
+          done
 
       - name: Run the examples
         shell: bash
