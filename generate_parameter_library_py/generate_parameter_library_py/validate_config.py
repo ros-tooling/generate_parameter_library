@@ -45,7 +45,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import yaml
 
 from generate_parameter_library_py.parse_yaml import GenerateCode
-from generate_parameter_library_py.python_validators import ParameterValidators
+from generate_parameter_library_runtime_py.python_validators import ParameterValidators
 
 ROS_PARAMETERS_KEY = 'ros__parameters'
 WILDCARD_NAMES = ('*', '**')

@@ -12,7 +12,8 @@
   <license>BSD-3-Clause</license>
   <author email="paul.gesel@picknik.ai">Paul Gesel</author>
 
-  <depend>generate_parameter_library</depend>
+  <build_depend>generate_parameter_library</build_depend>
+  <depend>generate_parameter_library_runtime_cpp</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
   <depend>ros2_control_cmake</depend>
