@@ -20,6 +20,7 @@
   <exec_depend>generate_parameter_library_runtime_py</exec_depend>
 
   <test_depend>ament_index_python</test_depend>
+  <test_depend>generate_parameter_library_runtime_py</test_depend>
   <test_depend>python3-packaging</test_depend>
   <test_depend>python3-pytest</test_depend>
 
