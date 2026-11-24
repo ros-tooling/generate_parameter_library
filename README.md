@@ -327,7 +327,7 @@ Note: `lt<>`, `gt<>`, `lt_eq<>`, or `gt_eq<>` cannot be used together with `boun
 | ------------ | ------------------- | ---------------------------------------------- |
 | fixed_size<> | [length]            | Length string is specified length              |
 | size_gt<>    | [length]            | Length string is greater than specified length |
-| size_lt<>    | [length]            | Length string is less less specified length    |
+| size_lt<>    | [length]            | Length string is less than specified length    |
 | not_empty<>  | []                  | String parameter is not empty                  |
 | one_of<>     | [[val1, val2, ...]] | String is one of the specified values          |
 
@@ -338,7 +338,7 @@ Note: `lt<>`, `gt<>`, `lt_eq<>`, or `gt_eq<>` cannot be used together with `boun
 | subset_of<>            | [[val1, val2, ...]] | Every element is one of the list                    |
 | fixed_size<>           | [length]            | Number of elements is specified length              |
 | size_gt<>              | [length]            | Number of elements is greater than specified length |
-| size_lt<>              | [length]            | Number of elements is less less specified length    |
+| size_lt<>              | [length]            | Number of elements is less than specified length    |
 | not_empty<>            | []                  | Has at-least one element                            |
 | element_bounds<>       | [lower, upper]      | Bounds checking each element (inclusive)            |
 | lower_element_bounds<> | [lower]             | Lower bound for each element (inclusive)            |
