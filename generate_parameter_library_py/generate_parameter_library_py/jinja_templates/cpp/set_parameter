@@ -3,4 +3,4 @@ RCLCPP_DEBUG_STREAM(logger_, (prefix_ + "{{parameter_name}}") << ": " << param.g
 {% if parameter_validations|length -%}
 {{parameter_validations-}}
 {% endif -%}
-updated_params.{{parameter_name}} = param.{{parameter_as_function}};
+updated_params.{{parameter_name}} = {{read_parameter}};

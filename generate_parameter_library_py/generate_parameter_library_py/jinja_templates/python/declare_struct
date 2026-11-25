@@ -1,5 +1,8 @@
 class __{{struct_name}}:
 {%- filter indent(width=4) %}
+{% if struct_enums|length -%}
+{{struct_enums-}}
+{% endif -%}
 def __init__(self):
 {%- filter indent(width=4) %}
 {% if struct_fields|length -%}

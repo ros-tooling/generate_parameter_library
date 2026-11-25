@@ -11,6 +11,11 @@ admittance_controller:
     validation:
       one_of<>: [ [ "spline", "linear" ] ]
       "custom_validators::no_args_validator": null
+  control_mode:
+    type: enum
+    enum_values: [position, velocity, effort]
+    default_value: position
+    description: "test code generation for enum parameters"
   subset_selection:
     type: string_array
     default_value: ["A", "B"]

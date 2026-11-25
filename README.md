@@ -211,6 +211,7 @@ when using `gmock` test library.
 ## Detailed Documentation
 * [Cpp namespace](#cpp-namespace)
 * [Parameter definition](#parameter-definition)
+* [Enum parameters](#enum-parameters)
 * [Built-In Validators](#built-in-validators)
 * [Custom validator functions](#custom-validator-functions)
 * [Nested structures](#nested-structures)
@@ -259,6 +260,7 @@ The file is read as plain YAML data: language-specific tags such as `!!python/ob
 | read_only              | Can only be set at launch and are not dynamic.                                                                 |
 | description            | Displayed by `ros2 param describe`.                                                                            |
 | validation             | Dictionary of validation functions and their parameters.                                                       |
+| enum_values            | The allowed values of an `enum` parameter, see [Enum parameters](#enum-parameters).                            |
 | additional_constraints | Additional constraints that end up on the ParameterDescriptor but are not used for validation by this package. |
 
 The types of parameters in ros2 map to C++ types.
@@ -266,6 +268,7 @@ The types of parameters in ros2 map to C++ types.
 | Parameter Type  | C++ Type                   |
 | --------------- | -------------------------- |
 | string          | `std::string`              |
+| enum            | `enum class`, see below    |
 | double          | `double`                   |
 | int             | `int`                      |
 | bool            | `bool`                     |
@@ -281,6 +284,48 @@ The corresponding C++ type is a data wrapper class for conveniently accessing th
 Note that any fixed size type will automatically use a `size_lt` validator. Validators are explained in the next section.
 
 The purpose of the `none` type is purely documentation, and won't generate any C++ code. See [Parameter documentation](#parameter-documentation) for details.
+
+### Enum parameters
+A parameter of type `enum` is a string parameter that takes one of the values listed in `enum_values`.
+The generated code holds it as an enum, so it can be compared and switched on without string comparisons.
+
+```yaml
+cpp_namespace:
+  control_mode:
+    type: enum
+    enum_values: [position, velocity, effort]
+    default_value: position
+    description: "Interface that the controller commands"
+```
+
+On the node, `control_mode` is a string parameter.
+A `one_of<>` validator with the `enum_values` is added automatically and runs before any other validator, so a value that is not listed is rejected; writing `one_of<>` yourself is an error.
+The values are used verbatim as enumerators, so each must be an identifier that starts with a letter and is not a C++ or Python keyword.
+They must be unique, and `default_value` must be one of them.
+Prefer lowercase values: uppercase ones such as `ERROR` (a macro on Windows), `NULL` or `EOF` collide with common macros in C++.
+Quote values such as `on`, `off`, `yes` or `no`, which YAML otherwise reads as booleans.
+
+The enum is named after the parameter in PascalCase (`ControlMode`) and declared in the struct that holds the parameter, `Params` or the struct of its group.
+Its name must differ from that struct, `Params` and the other members of the struct, and must not be a keyword, such as `None` for a parameter called `none`.
+In C++, it is an `enum class`, and string conversions are generated in the namespace:
+
+```c++
+if (params.control_mode == cpp_namespace::Params::ControlMode::velocity) {
+  // ...
+}
+RCLCPP_INFO(logger, "control mode: %s", to_string(params.control_mode).c_str());
+// throws std::invalid_argument for a string that is not listed
+auto mode = cpp_namespace::from_string<cpp_namespace::Params::ControlMode>("effort");
+```
+
+In Python, the enum class derives from `(str, enum.Enum)`, so its members still compare equal to their strings:
+
+```python
+params.control_mode == cpp_namespace.Params.ControlMode.velocity
+params.control_mode == "velocity"  # also True
+```
+
+Mapped parameters (`__map_`) cannot have type `enum` yet, and there is no enum array type; use `string` with `one_of<>` or `string_array` with `subset_of<>` there.
 
 ### Built-In Validators
 Validators are C++ functions that take arguments represented by a key-value pair in yaml.

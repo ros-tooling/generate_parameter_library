@@ -1,5 +1,8 @@
 struct {{struct_name}} {
 {%- filter indent(width=4) %}
+{% if struct_enums|length -%}
+{{struct_enums-}}
+{% endif -%}
 {% if struct_fields|length -%}
 {{struct_fields-}}
 {% endif -%}

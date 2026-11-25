@@ -12,7 +12,9 @@
 #include <rclcpp/logger.hpp>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -67,6 +69,7 @@ template <typename T, size_t capacity>
 {%- filter indent(width=4) %}
 struct Params {
 {%- filter indent(width=4) %}
+{{enum_content-}}
 {{field_content-}}
 {{sub_struct_content-}}
 // for detecting if the parameter struct has been updated
@@ -74,6 +77,37 @@ rclcpp::Time __stamp;
 {% endfilter -%}
 };
 {%- endfilter %}
+{%- if enums|length %}
+
+    // string conversions of the enum parameters, which are string parameters
+    template <typename T>
+    [[nodiscard]] T from_string(std::string_view value);
+{% for enum in enums %}
+    [[nodiscard]] inline std::string to_string({{enum.lang_type}} value) {
+      switch (value) {
+{%- for value in enum.enum_values %}
+        case {{enum.lang_type}}::{{value}}:
+          return "{{value}}";
+{%- endfor %}
+      }
+      throw std::invalid_argument("Invalid value of enum {{enum.lang_type}}");
+    }
+
+    template <>
+    [[nodiscard]] inline {{enum.lang_type}} from_string<{{enum.lang_type}}>(std::string_view value) {
+{%- for value in enum.enum_values %}
+      if (value == "{{value}}") {
+        return {{enum.lang_type}}::{{value}};
+      }
+{%- endfor %}
+      throw std::invalid_argument(fmt::format("Invalid value '{}' of enum {{enum.lang_type}}", value));
+    }
+
+    [[nodiscard]] inline auto to_parameter_value({{enum.lang_type}} value) {
+      return rclcpp::ParameterValue(to_string(value));
+    }
+{% endfor %}
+{%- endif %}
 
 {%- filter indent(width=4) %}
 struct StackParams {

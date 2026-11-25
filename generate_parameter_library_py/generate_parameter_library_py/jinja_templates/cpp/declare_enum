@@ -1,0 +1,5 @@
+enum class {{enum_name}} {
+{%- for value in enum_values %}
+    {{value}},
+{%- endfor %}
+};
