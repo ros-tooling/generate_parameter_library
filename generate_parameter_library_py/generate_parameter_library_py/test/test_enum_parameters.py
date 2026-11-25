@@ -76,26 +76,28 @@ def test_cpp_header_declares_enum_class_and_conversions(tmp_path):
     header = generate(tmp_path, run_cpp, 'params.hpp')
 
     assert 'enum class ControlMode {' in header
-    assert 'Params::ControlMode control_mode = Params::ControlMode::position;' in header
-    assert 'Params::RequiredMode required_mode;' in header
+    # C++ names the enum from the global namespace, which no nested type hides
+    control_mode = '::test_params::Params::ControlMode'
+    assert f'{control_mode} control_mode = {control_mode}::position;' in header
+    assert '::test_params::Params::RequiredMode required_mode;' in header
     # a nested enum is declared in its group and named through it
+    mode = '::test_params::Params::Pid::Mode'
     assert 'enum class Mode {' in header
-    assert 'Params::Pid::Mode mode = Params::Pid::Mode::pi;' in header
+    assert f'{mode} mode = {mode}::pi;' in header
     # the ROS parameter stays a string
     assert 'auto parameter = rclcpp::ParameterType::PARAMETER_STRING;' in header
     assert 'auto parameter = to_parameter_value(updated_params.control_mode);' in header
     assert 'one_of<std::string>(param, {"position", "velocity", "effort"})' in header
     assert (
-        'updated_params.control_mode = '
-        'from_string<Params::ControlMode>(param.as_string());' in header
-    )
-    assert (
-        'updated_params.pid.mode = from_string<Params::Pid::Mode>(param.as_string());'
+        f'updated_params.control_mode = from_string<{control_mode}>(param.as_string());'
         in header
     )
-    assert 'inline std::string to_string(Params::ControlMode value) {' in header
-    assert 'case Params::ControlMode::velocity:' in header
-    assert 'inline auto to_parameter_value(Params::Pid::Mode value) {' in header
+    assert (
+        f'updated_params.pid.mode = from_string<{mode}>(param.as_string());' in header
+    )
+    assert f'inline std::string to_string({control_mode} value) {{' in header
+    assert f'case {control_mode}::velocity:' in header
+    assert f'inline auto to_parameter_value({mode} value) {{' in header
     # StackParams holds the enum declared in Params
     stack_params = header[header.index('struct StackParams {') :]
     assert 'output.control_mode = params.control_mode;' in header
@@ -221,7 +223,19 @@ def test_validate_config_checks_enum_values(tmp_path):
         ),
         (['mode', 'type: enum', 'enum_values: [fast, 2nd]'], 'not a valid identifier'),
         (['mode', 'type: enum', 'enum_values: [fast, a-b]'], 'not a valid identifier'),
-        (['mode', 'type: enum', 'enum_values: [fast, true]'], 'not a valid identifier'),
+        # unquoted on/off/yes/no/true/false are YAML booleans
+        (
+            ['mode', 'type: enum', 'enum_values: [off, on]'],
+            "False .* quote it, e.g. 'on'",
+        ),
+        (
+            ['mode', 'type: enum', 'enum_values: [fast, yes]'],
+            "True .* quote it, e.g. 'on'",
+        ),
+        (
+            ['mode', 'type: enum', "enum_values: ['off', 'on']", 'default_value: off'],
+            "default value False, a boolean. .* quote it, e.g. 'on'",
+        ),
         (['mode', 'type: enum', 'enum_values: [fast, "é"]'], 'not a valid identifier'),
         (['mode', 'type: enum', 'enum_values: [fast, delete]'], 'keyword'),
         (['mode', 'type: enum', 'enum_values: [fast, and]'], 'keyword'),
@@ -279,6 +293,43 @@ def test_invalid_enum_definition_is_a_syntax_error(
             '    enum_values: [a]\n',
             'which another member of its struct already uses',
         ),
+        # an enum named Params inside a group would hide the root Params struct
+        (
+            'test_params:\n'
+            '  pid:\n'
+            '    params:\n'
+            '      type: enum\n'
+            '      enum_values: [a]\n',
+            'would hide the Params struct',
+        ),
+        # Python would set the group as an attribute that masks the enum class
+        (
+            'test_params:\n'
+            '  control_mode:\n'
+            '    type: enum\n'
+            '    enum_values: [a]\n'
+            '  ControlMode:\n'
+            '    gain:\n'
+            '      type: double\n',
+            'which another member of its struct already uses',
+        ),
+        # None, True and False are Python keywords
+        (
+            'test_params:\n  none:\n    type: enum\n    enum_values: [a]\n',
+            "type 'None', which is not a valid type name",
+        ),
+        (
+            "test_params:\n  'true':\n    type: enum\n    enum_values: [a]\n",
+            "type 'True', which is not a valid type name",
+        ),
+        (
+            'test_params:\n'
+            '  pid:\n'
+            "    'false':\n"
+            '      type: enum\n'
+            '      enum_values: [a]\n',
+            "type 'False', which is not a valid type name",
+        ),
         (
             'test_params:\n'
             '  joints:\n'
@@ -297,3 +348,26 @@ def test_enum_type_name_clashes(tmp_path, language, definition, message):
     yaml_file.write_text(definition)
     with pytest.raises(YAMLSyntaxError, match=message):
         GenerateCode(language).parse(str(yaml_file), '')
+
+
+def test_group_named_params_does_not_hide_the_enum_type(tmp_path):
+    """A nested struct named Params used to hide the root of the C++ type name."""
+    header = generate(
+        tmp_path,
+        run_cpp,
+        'params.hpp',
+        'test_params:\n'
+        '  pid:\n'
+        '    mode:\n'
+        '      type: enum\n'
+        '      enum_values: [a, b]\n'
+        '      default_value: a\n'
+        '    params:\n'
+        '      gain:\n'
+        '        type: double\n'
+        '        default_value: 1.0\n',
+    )
+
+    assert 'struct Params {' in header.split('struct Pid {')[1]
+    mode = '::test_params::Params::Pid::Mode'
+    assert f'{mode} mode = {mode}::a;' in header

@@ -302,8 +302,11 @@ On the node, `control_mode` is a string parameter.
 A `one_of<>` validator with the `enum_values` is added automatically and runs before any other validator, so a value that is not listed is rejected; writing `one_of<>` yourself is an error.
 The values are used verbatim as enumerators, so each must be an identifier that starts with a letter and is not a C++ or Python keyword.
 They must be unique, and `default_value` must be one of them.
+Prefer lowercase values: uppercase ones such as `ERROR` (a macro on Windows), `NULL` or `EOF` collide with common macros in C++.
+Quote values such as `on`, `off`, `yes` or `no`, which YAML otherwise reads as booleans.
 
-The enum is named after the parameter in PascalCase (`ControlMode`) and declared in the struct that holds the parameter, `Params` or the struct of its group, so its name must differ from that struct's name.
+The enum is named after the parameter in PascalCase (`ControlMode`) and declared in the struct that holds the parameter, `Params` or the struct of its group.
+Its name must differ from that struct, `Params` and the other members of the struct, and must not be a keyword, such as `None` for a parameter called `none`.
 In C++, it is an `enum class`, and string conversions are generated in the namespace:
 
 ```c++

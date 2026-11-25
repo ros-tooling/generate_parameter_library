@@ -210,8 +210,17 @@ CPP_KEYWORDS = frozenset(
 )
 
 
+# YAML 1.1 reads these words as booleans unless they are quoted.
+YAML_BOOL_HINT = (
+    'YAML reads unquoted on/off, yes/no and true/false as booleans: '
+    "quote it, e.g. 'on'."
+)
+
+
 @typechecked
-def validate_enum_values(param_name: str, enum_values: Any, validations_dict: dict):
+def validate_enum_values(
+    param_name: str, enum_values: Any, default_value: Any, validations_dict: dict
+):
     if validations_dict is not None and any(
         validation_base_name(name) == 'one_of' for name in validations_dict
     ):
@@ -225,6 +234,11 @@ def validate_enum_values(param_name: str, enum_values: Any, validations_dict: di
             'a non-empty list of names.'
         )
     for value in enum_values:
+        if isinstance(value, bool):
+            raise compile_error(
+                f'Enum value {value!r} of parameter {param_name} is a boolean. '
+                + YAML_BOOL_HINT
+            )
         # The names are used verbatim as C++ enumerators and Python members.
         if not (isinstance(value, str) and value.isascii() and value.isidentifier()):
             raise compile_error(
@@ -250,6 +264,11 @@ def validate_enum_values(param_name: str, enum_values: Any, validations_dict: di
         raise compile_error(
             f"Parameter {param_name} lists {', '.join(duplicates)} more than once "
             "in 'enum_values'."
+        )
+    if isinstance(default_value, bool):
+        raise compile_error(
+            f'Parameter {param_name} has the default value {default_value!r}, a '
+            'boolean. ' + YAML_BOOL_HINT
         )
 
 
@@ -476,12 +495,15 @@ class CodeGenEnumVariable(CodeGenVariableBase):
         defined_type: str,
         default_value: Any,
         enum_values: List[str],
-        struct_names: List[str],
+        nested_name_list: List[str],
     ):
         self.enum_values = enum_values
         # The enum is declared in the struct holding the field. C++ names it
-        # through the enclosing structs, so that StackParams can use it too.
-        self.enum_path = ['Params'] + [pascal_case(x) for x in struct_names]
+        # from the namespace through the enclosing structs, so that StackParams
+        # can use it too and no nested type named Params can hide the root.
+        namespace, struct_names = nested_name_list[:1], nested_name_list[1:]
+        self.enum_path = namespace + ['Params']
+        self.enum_path += [pascal_case(x) for x in struct_names]
         self.enum_path.append(pascal_case(name))
         super().__init__(language, name, param_name, defined_type, default_value)
         # The ROS parameter is a string, which validators and documentation see.
@@ -579,22 +601,45 @@ class DeclareStruct:
     def check_enum_names(self, rendered_name: str):
         """Reject enum types that clash with a name in or of the struct holding them."""
         taken = {pascal_case(x.struct_name) for x in self.sub_structs}
+        # Python sets each group as an attribute named after it.
+        taken.update(
+            x.struct_name
+            for x in self.sub_structs
+            if not is_mapped_parameter(x.struct_name)
+        )
         taken.update(x.code_gen_variable.name for x in self.fields)
         for enum in self.enums:
             variable = enum.code_gen_variable
-            if variable.enum_name == rendered_name:
+            name = variable.enum_name
+            if (
+                not name.isidentifier()
+                or keyword.iskeyword(name)
+                or name in CPP_KEYWORDS
+            ):
                 raise compile_error(
                     f'Enum parameter {variable.param_name} would declare the type '
-                    f'{variable.enum_name} inside the struct of the same name. '
+                    f'{name!r}, which is not a valid type name in C++ and Python. '
+                    'Rename the parameter.'
+                )
+            if name == rendered_name:
+                raise compile_error(
+                    f'Enum parameter {variable.param_name} would declare the type '
+                    f'{name} inside the struct of the same name. '
                     'Rename the parameter or its group.'
                 )
-            if variable.enum_name in taken:
+            if name == 'Params':
                 raise compile_error(
                     f'Enum parameter {variable.param_name} would declare the type '
-                    f'{variable.enum_name}, which another member of its struct '
-                    'already uses. Rename one of them.'
+                    'Params, which would hide the Params struct of the generated '
+                    'code. Rename the parameter.'
                 )
-            taken.add(variable.enum_name)
+            if name in taken:
+                raise compile_error(
+                    f'Enum parameter {variable.param_name} would declare the type '
+                    f'{name}, which another member of its struct already uses. '
+                    'Rename one of them.'
+                )
+            taken.add(name)
 
     def sub_struct_content(self):
         content = ''.join(str(x) for x in self.sub_structs)
@@ -1052,7 +1097,7 @@ def preprocess_inputs(language, name, value, nested_name_list):
                 'validation instead.'
             )
         enum_values = value.get('enum_values')
-        validate_enum_values(param_name, enum_values, validations_dict)
+        validate_enum_values(param_name, enum_values, default_value, validations_dict)
         code_gen_variable = CodeGenEnumVariable(
             language,
             name,
@@ -1060,7 +1105,7 @@ def preprocess_inputs(language, name, value, nested_name_list):
             defined_type,
             default_value,
             enum_values,
-            nested_name_list[1:],
+            nested_name_list,
         )
         if default_value is not None and default_value not in enum_values:
             raise compile_error(

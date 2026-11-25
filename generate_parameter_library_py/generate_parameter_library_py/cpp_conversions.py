@@ -49,7 +49,7 @@ class CPPConversions:
             'int_array_fixed': lambda defined_type, templates: f'rsl::StaticVector<{templates[0]}, {templates[1]}>',
             'string_array_fixed': lambda defined_type, templates: f'rsl::StaticVector<{templates[0]}, {templates[1]}>',
             'string_fixed': lambda defined_type, templates: f'rsl::StaticString<{templates[1]}>',
-            'enum': lambda defined_type, templates: '::'.join(templates),
+            'enum': lambda defined_type, templates: '::' + '::'.join(templates),
         }
         self.yaml_type_to_as_function = {
             'none': None,
