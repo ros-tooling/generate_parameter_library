@@ -46,6 +46,7 @@ You should see:
   command_interfaces
   control.frame.external
   control.frame.id
+  control_mode
   dof_names
   elbow_joint.rz.limit
   elbow_joint.rz.weight

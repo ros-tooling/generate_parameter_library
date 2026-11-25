@@ -49,6 +49,7 @@ class PythonConversions:
             'int_array_fixed': lambda defined_type, templates: '[int]',
             'string_array_fixed': lambda defined_type, templates: '[str]',
             'string_fixed': lambda defined_type, templates: 'str',
+            'enum': lambda defined_type, templates: templates[-1],
         }
         self.yaml_type_to_as_function = {
             'none': None,
@@ -65,6 +66,7 @@ class PythonConversions:
             'int_array_fixed': 'value',
             'string_array_fixed': 'value',
             'string_fixed': 'value',
+            'enum': 'value',
         }
         self.lang_str_value_func = {
             'none': self.no_code,
@@ -81,6 +83,7 @@ class PythonConversions:
             'int_array_fixed': self.int_array_to_str,
             'string_array_fixed': self.str_array_to_str,
             'string_fixed': self.str_to_str,
+            'enum': self.str_to_str,
         }
         self.python_val_to_str_func = {
             "<class 'bool'>": self.bool_to_str,
@@ -130,6 +133,20 @@ class PythonConversions:
     @typechecked
     def update_parameter_pass_validation(self) -> str:
         return ''
+
+    # an enum parameter is a string parameter held as a (str, enum.Enum) member
+    @typechecked
+    def enum_value_to_str(self, enum_type: str, value: str) -> str:
+        return f'self.{enum_type}.{value}'
+
+    @typechecked
+    def enum_from_parameter(self, enum_type: str, owner: str) -> str:
+        # the struct that holds the field also holds the enum class
+        return f'{owner}.{enum_type}(param.value)'
+
+    @typechecked
+    def enum_to_parameter_value(self, field: str) -> str:
+        return f'{field}.value'
 
     @typechecked
     def no_code(self, s: Union[None, str]):

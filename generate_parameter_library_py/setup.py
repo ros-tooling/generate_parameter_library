@@ -86,6 +86,7 @@ setup(
     install_requires=['setuptools', 'typeguard', 'jinja2', 'pyyaml'],
     package_data={
         '': [
+            'jinja_templates/cpp/declare_enum',
             'jinja_templates/cpp/declare_parameter',
             'jinja_templates/cpp/declare_runtime_parameter',
             'jinja_templates/cpp/declare_struct',
@@ -104,6 +105,7 @@ setup(
             'jinja_templates/rst/default_config',
             'jinja_templates/rst/documentation',
             'jinja_templates/rst/parameter_detail',
+            'jinja_templates/python/declare_enum',
             'jinja_templates/python/declare_parameter',
             'jinja_templates/python/declare_runtime_parameter',
             'jinja_templates/python/declare_struct',

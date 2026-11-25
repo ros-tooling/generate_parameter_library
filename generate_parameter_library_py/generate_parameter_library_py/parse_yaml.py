@@ -41,6 +41,7 @@ except ImportError as e:
 from typing import Any, List, Union
 from yaml.parser import ParserError
 from yaml.scanner import ScannerError
+import keyword
 import os
 import yaml
 
@@ -189,6 +190,66 @@ def validate_validator_combinations(
             "Parameter {} cannot combine 'bounds' with scalar bound validators "
             "(gt/gt_eq/lt/lt_eq). Use only 'bounds<>' for inclusive ranges, "
             'or only scalar bound validators.'.format(param_name)
+        )
+
+
+# Keywords and alternative tokens of C++20 and later, which cannot name an enumerator.
+CPP_KEYWORDS = frozenset(
+    '''
+    alignas alignof and and_eq asm auto bitand bitor bool break case catch char
+    char8_t char16_t char32_t class compl concept const consteval constexpr
+    constinit const_cast continue contract_assert co_await co_return co_yield
+    decltype default delete do double dynamic_cast else enum explicit export
+    extern false float for friend goto if inline int long mutable namespace new
+    noexcept not not_eq nullptr operator or or_eq private protected public
+    register reinterpret_cast requires return short signed sizeof static
+    static_assert static_cast struct switch template this thread_local throw
+    true try typedef typeid typename union unsigned using virtual void volatile
+    wchar_t while xor xor_eq
+    '''.split()
+)
+
+
+@typechecked
+def validate_enum_values(param_name: str, enum_values: Any, validations_dict: dict):
+    if validations_dict is not None and any(
+        validation_base_name(name) == 'one_of' for name in validations_dict
+    ):
+        raise compile_error(
+            f"Parameter {param_name} has type 'enum', which takes its allowed "
+            "values from 'enum_values'. Remove the 'one_of' validation."
+        )
+    if not isinstance(enum_values, list) or not enum_values:
+        raise compile_error(
+            f"Parameter {param_name} has type 'enum' and needs 'enum_values', "
+            'a non-empty list of names.'
+        )
+    for value in enum_values:
+        # The names are used verbatim as C++ enumerators and Python members.
+        if not (isinstance(value, str) and value.isascii() and value.isidentifier()):
+            raise compile_error(
+                f'Enum value {value!r} of parameter {param_name} is not a valid '
+                'identifier.'
+            )
+        if value in CPP_KEYWORDS or keyword.iskeyword(value):
+            raise compile_error(
+                f'Enum value {value!r} of parameter {param_name} is a C++ or '
+                'Python keyword.'
+            )
+        # Python's enum rejects _sunder_ names and 'mro', and does not make
+        # __private names members.
+        if value.startswith('_') or value == 'mro':
+            raise compile_error(
+                f'Enum value {value!r} of parameter {param_name} is reserved by '
+                "Python's enum module. Use a name that starts with a letter."
+            )
+    duplicates = sorted(
+        {value for value in enum_values if enum_values.count(value) > 1}
+    )
+    if duplicates:
+        raise compile_error(
+            f"Parameter {param_name} lists {', '.join(duplicates)} more than once "
+            "in 'enum_values'."
         )
 
 
@@ -343,6 +404,16 @@ class CodeGenVariableBase:
             raise compile_error('invalid yaml type: %s' % type(self.defined_type))
         return self.conversion.yaml_type_to_as_function[self.defined_type]
 
+    def read_parameter_str(self):
+        """Return the expression that reads `param` into the struct field."""
+        as_function = self.parameter_as_function_str()
+        # type none generates no code
+        return None if as_function is None else 'param.' + as_function
+
+    def parameter_value_str(self, field: str):
+        """Return the expression that turns the struct field into a parameter value."""
+        return field
+
     def get_python_val_to_str_func(self, arg):
         return self.conversion.python_val_to_str_func[str(type(arg))]
 
@@ -393,6 +464,54 @@ class CodeGenFixedVariable(CodeGenVariableBase):
         return int_to_integer_str(get_fixed_base_type(self.defined_type)).upper()
 
 
+class CodeGenEnumVariable(CodeGenVariableBase):
+    """A `type: enum` parameter: a string parameter held as an enum in the struct."""
+
+    @typechecked
+    def __init__(
+        self,
+        language: str,
+        name: str,
+        param_name: str,
+        defined_type: str,
+        default_value: Any,
+        enum_values: List[str],
+        struct_names: List[str],
+    ):
+        self.enum_values = enum_values
+        # The enum is declared in the struct holding the field. C++ names it
+        # through the enclosing structs, so that StackParams can use it too.
+        self.enum_path = ['Params'] + [pascal_case(x) for x in struct_names]
+        self.enum_path.append(pascal_case(name))
+        super().__init__(language, name, param_name, defined_type, default_value)
+        # The ROS parameter is a string, which validators and documentation see.
+        self.defined_base_type = 'string'
+        func = self.conversion.defined_type_to_lang_type['string']
+        self.lang_base_type = func('string', None)
+        if default_value is not None and language in ('cpp', 'python'):
+            self.lang_str_value = self.conversion.enum_value_to_str(
+                self.lang_type, default_value
+            )
+
+    @property
+    def enum_name(self):
+        return self.enum_path[-1]
+
+    def process_type(self, defined_type):
+        return defined_type, self.enum_path
+
+    def get_parameter_type(self):
+        return 'STRING'
+
+    def read_parameter_str(self):
+        # The struct that holds the field also holds the enum.
+        owner = '.'.join(['updated_params'] + self.param_name.split('.')[:-1])
+        return self.conversion.enum_from_parameter(self.lang_type, owner)
+
+    def parameter_value_str(self, field: str):
+        return self.conversion.enum_to_parameter_value(field)
+
+
 # Each template has a corresponding class with the str filling in the template with jinja
 class VariableDeclaration:
     @typechecked
@@ -412,11 +531,29 @@ class VariableDeclaration:
         return code
 
 
+class EnumDeclaration:
+    @typechecked
+    def __init__(self, code_gen_variable: CodeGenEnumVariable):
+        self.code_gen_variable = code_gen_variable
+
+    def __str__(self):
+        data = {
+            'enum_name': self.code_gen_variable.enum_name,
+            'enum_values': self.code_gen_variable.enum_values,
+        }
+        j2_template = Template(
+            GenerateCode.templates['declare_enum'], keep_trailing_newline=True
+        )
+        code = j2_template.render(data, trim_blocks=True)
+        return code
+
+
 class DeclareStruct:
     @typechecked
     def __init__(self, struct_name: str, fields: List[VariableDeclaration]):
         self.struct_name = struct_name
         self.fields = fields
+        self.enums = []
         self.sub_structs = []
         self.struct_instance = ''
 
@@ -424,12 +561,40 @@ class DeclareStruct:
     def add_field(self, field: VariableDeclaration):
         self.fields.append(field)
 
+    @typechecked
+    def add_enum(self, enum: EnumDeclaration):
+        self.enums.append(enum)
+
     def add_sub_struct(self, sub_struct):
         self.sub_structs.append(sub_struct)
 
     def field_content(self):
         content = ''.join(str(x) for x in self.fields)
         return str(content)
+
+    def enum_content(self):
+        return ''.join(str(x) for x in self.enums)
+
+    @typechecked
+    def check_enum_names(self, rendered_name: str):
+        """Reject enum types that clash with a name in or of the struct holding them."""
+        taken = {pascal_case(x.struct_name) for x in self.sub_structs}
+        taken.update(x.code_gen_variable.name for x in self.fields)
+        for enum in self.enums:
+            variable = enum.code_gen_variable
+            if variable.enum_name == rendered_name:
+                raise compile_error(
+                    f'Enum parameter {variable.param_name} would declare the type '
+                    f'{variable.enum_name} inside the struct of the same name. '
+                    'Rename the parameter or its group.'
+                )
+            if variable.enum_name in taken:
+                raise compile_error(
+                    f'Enum parameter {variable.param_name} would declare the type '
+                    f'{variable.enum_name}, which another member of its struct '
+                    'already uses. Rename one of them.'
+                )
+            taken.add(variable.enum_name)
 
     def sub_struct_content(self):
         content = ''.join(str(x) for x in self.sub_structs)
@@ -466,6 +631,7 @@ class DeclareStruct:
         data = {
             'struct_name': pascal_case(self.struct_name),
             'struct_instance': self.struct_instance,
+            'struct_enums': self.enum_content(),
             'struct_fields': str(field_str),
             'sub_structs': str(sub_struct_str),
             'sub_struct_python_instances': sub_struct_python_instances,
@@ -549,6 +715,7 @@ class UpdateParameterBase:
     def __init__(self, parameter_name: str, code_gen_variable: CodeGenVariableBase):
         self.parameter_name = parameter_name
         self.parameter_as_function = code_gen_variable.parameter_as_function_str()
+        self.read_parameter = code_gen_variable.read_parameter_str()
         self.parameter_validations = []
 
     @typechecked
@@ -563,7 +730,7 @@ class UpdateParameter(UpdateParameterBase):
         data = {
             'parameter_name': self.parameter_name,
             'parameter_validations': str(parameter_validations_str),
-            'parameter_as_function': self.parameter_as_function,
+            'read_parameter': self.read_parameter,
         }
 
         j2_template = Template(GenerateCode.templates['update_parameter'])
@@ -620,6 +787,7 @@ class SetParameterBase:
     def __init__(self, parameter_name: str, code_gen_variable: CodeGenVariableBase):
         self.parameter_name = parameter_name
         self.parameter_as_function = code_gen_variable.parameter_as_function_str()
+        self.read_parameter = code_gen_variable.read_parameter_str()
         self.parameter_validations = []
 
     @typechecked
@@ -634,7 +802,7 @@ class SetParameter(SetParameterBase):
         data = {
             'parameter_name': self.parameter_name,
             'parameter_validations': str(parameter_validations_str),
-            'parameter_as_function': self.parameter_as_function,
+            'read_parameter': self.read_parameter,
         }
 
         j2_template = Template(GenerateCode.templates['set_parameter'])
@@ -680,7 +848,9 @@ class DeclareParameter(DeclareParameterBase):
         if len(self.code_gen_variable.lang_str_value) == 0:
             self.parameter_value = ''
         else:
-            self.parameter_value = self.parameter_name
+            self.parameter_value = self.code_gen_variable.parameter_value_str(
+                self.parameter_name
+            )
         bool_to_str = self.code_gen_variable.conversion.bool_to_str
 
         parameter_validations = self.parameter_validations
@@ -854,12 +1024,18 @@ def preprocess_inputs(language, name, value, nested_name_list):
         'additional_constraints',
         'validation',
         'type',
+        'enum_values',
     }
     invalid_keys = value.keys() - valid_keys
     if len(invalid_keys) > 0:
         raise compile_error(
             "Invalid syntax in parameter %s. '%s' is not valid syntax"
             % (param_name, next(iter(invalid_keys)))
+        )
+    if 'enum_values' in value and defined_type != 'enum':
+        raise compile_error(
+            f"Invalid syntax in parameter {param_name}. 'enum_values' is only "
+            "valid for type 'enum'"
         )
 
     # optional attributes
@@ -868,7 +1044,30 @@ def preprocess_inputs(language, name, value, nested_name_list):
     validate_fixed_default_size(
         param_name, defined_type, default_value, validations_dict
     )
-    if not is_fixed_type(defined_type):
+    if defined_type == 'enum':
+        if is_mapped_parameter(param_name):
+            raise compile_error(
+                f"Parameter {param_name} has type 'enum', which is not supported "
+                "for mapped parameters yet. Use type 'string' with a 'one_of' "
+                'validation instead.'
+            )
+        enum_values = value.get('enum_values')
+        validate_enum_values(param_name, enum_values, validations_dict)
+        code_gen_variable = CodeGenEnumVariable(
+            language,
+            name,
+            param_name,
+            defined_type,
+            default_value,
+            enum_values,
+            nested_name_list[1:],
+        )
+        if default_value is not None and default_value not in enum_values:
+            raise compile_error(
+                f'Parameter {param_name} has the default value {default_value!r}, '
+                "which is not one of its 'enum_values'."
+            )
+    elif not is_fixed_type(defined_type):
         code_gen_variable = CodeGenVariable(
             language, name, param_name, defined_type, default_value
         )
@@ -883,6 +1082,10 @@ def preprocess_inputs(language, name, value, nested_name_list):
     additional_constraints = value.get('additional_constraints', '')
     if is_fixed_type(defined_type):
         validations_dict['size_lt<>'] = fixed_type_size(defined_type) + 1
+    if defined_type == 'enum':
+        # Validated first, so that only listed values reach the conversion
+        # to the enum and the other validators.
+        validations_dict = {'one_of<>': [enum_values], **validations_dict}
 
     validate_validator_combinations(param_name, defined_type, validations_dict)
 
@@ -932,6 +1135,7 @@ class GenerateCode:
         self.remove_dynamic_parameter = []
         self.declare_parameter_sets = []
         self.set_stack_params = []
+        self.enums = []
         self.user_validation_file = ''
 
     def parse(self, yaml_file, validate_header):
@@ -1041,6 +1245,9 @@ class GenerateCode:
             update_parameter.add_parameter_validation(parameter_validation)
 
         self.struct_tree.add_field(var)
+        if isinstance(code_gen_variable, CodeGenEnumVariable):
+            self.struct_tree.add_enum(EnumDeclaration(code_gen_variable))
+            self.enums.append(code_gen_variable)
         if not is_runtime_parameter and (
             isinstance(code_gen_variable, CodeGenFixedVariable)
             or not (
@@ -1085,6 +1292,8 @@ class GenerateCode:
                     self.parse_dict(key, root_map[key], nested_name)
                     nested_name.pop()
 
+            # The parameters of the root element are fields of Params.
+            sub_struct.check_enum_names(pascal_case(name) if nested_name else 'Params')
             self.struct_tree = cur_struct_tree
             self.stack_struct_tree = cur_stack_struct_tree
         else:
@@ -1095,6 +1304,8 @@ class GenerateCode:
             'user_validation_file': self.user_validation_file,
             'comments': self.comments,
             'namespace': self.namespace,
+            'enum_content': self.struct_tree.sub_structs[0].enum_content(),
+            'enums': self.enums,
             'field_content': self.struct_tree.sub_structs[0].field_content(),
             'sub_struct_content': self.struct_tree.sub_structs[0].sub_struct_content(),
             'sub_struct_python_instances': '\n'.join(

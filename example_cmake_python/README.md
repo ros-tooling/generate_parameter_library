@@ -39,6 +39,7 @@ You should see:
   command_interfaces
   control.frame.external
   control.frame.id
+  control_mode
   enable_parameter_update_without_reactivation
   fixed_array
   fixed_string

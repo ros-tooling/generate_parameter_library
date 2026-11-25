@@ -49,6 +49,7 @@ class CPPConversions:
             'int_array_fixed': lambda defined_type, templates: f'rsl::StaticVector<{templates[0]}, {templates[1]}>',
             'string_array_fixed': lambda defined_type, templates: f'rsl::StaticVector<{templates[0]}, {templates[1]}>',
             'string_fixed': lambda defined_type, templates: f'rsl::StaticString<{templates[1]}>',
+            'enum': lambda defined_type, templates: '::'.join(templates),
         }
         self.yaml_type_to_as_function = {
             'none': None,
@@ -65,6 +66,7 @@ class CPPConversions:
             'int_array_fixed': 'as_integer_array()',
             'string_array_fixed': 'as_string_array()',
             'string_fixed': 'as_string()',
+            'enum': 'as_string()',
         }
         self.lang_str_value_func = {
             'none': self.no_code,
@@ -81,6 +83,7 @@ class CPPConversions:
             'int_array_fixed': self.int_array_fixed_to_str,
             'string_array_fixed': self.str_array_fixed_to_str,
             'string_fixed': self.str_fixed_to_str,
+            'enum': self.str_to_str,
         }
         self.python_val_to_str_func = {
             "<class 'bool'>": self.bool_to_str,
@@ -131,6 +134,20 @@ class CPPConversions:
     @typechecked
     def update_parameter_pass_validation(self) -> str:
         return ''
+
+    # an enum parameter is a string parameter held as an enum class
+    @typechecked
+    def enum_value_to_str(self, enum_type: str, value: str) -> str:
+        return f'{enum_type}::{value}'
+
+    @typechecked
+    def enum_from_parameter(self, enum_type: str, owner: str) -> str:
+        return f'from_string<{enum_type}>(param.as_string())'
+
+    @typechecked
+    def enum_to_parameter_value(self, field: str) -> str:
+        # to_parameter_value has an overload for each enum
+        return field
 
     @typechecked
     def no_code(self, s: Union[None, str]):

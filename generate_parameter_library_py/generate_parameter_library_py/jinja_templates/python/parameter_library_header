@@ -9,6 +9,7 @@ from rclpy.clock import Clock
 from rclpy.exceptions import InvalidParameterValueException
 from rclpy.time import Time
 import copy
+import enum
 import sys
 import rclpy
 import rclpy.parameter
@@ -23,6 +24,9 @@ class {{namespace}}:
 
 class Params:
 {%- filter indent(width=4) %}
+{% if enum_content|length -%}
+{{enum_content-}}
+{% endif -%}
 def __init__(self):
 {%- filter indent(width=4) %}
 # for detecting if the parameter struct has been updated

@@ -40,6 +40,7 @@
 
 #include <cmath>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 #include "generate_parameter_library_example/admittance_controller_parameters.hpp"
@@ -129,6 +130,24 @@ TEST_F(TestParamsConsistency, ScientificNotationNum) {
 TEST_F(TestParamsConsistency, InterpolationMode) {
   EXPECT_EQ(params_.interpolation_mode,
             node_->get_parameter("interpolation_mode").as_string());
+}
+
+TEST_F(TestParamsConsistency, ControlMode) {
+  EXPECT_EQ(params_.control_mode,
+            admittance_controller::Params::ControlMode::position);
+  EXPECT_EQ(to_string(params_.control_mode),
+            node_->get_parameter("control_mode").as_string());
+  EXPECT_EQ(param_listener_->get_stack_params().control_mode,
+            params_.control_mode);
+}
+
+TEST_F(TestParamsConsistency, ControlModeStringConversions) {
+  using admittance_controller::Params;
+  EXPECT_EQ(admittance_controller::from_string<Params::ControlMode>("velocity"),
+            Params::ControlMode::velocity);
+  EXPECT_THROW(
+      (void)admittance_controller::from_string<Params::ControlMode>("torque"),
+      std::invalid_argument);
 }
 
 TEST_F(TestParamsConsistency, SubsetSelection) {
@@ -346,6 +365,33 @@ TEST_F(TestParamsConsistency, UpdateInterpolationMode) {
   EXPECT_EQ(updated_params.interpolation_mode, new_value);
   EXPECT_EQ(updated_params.interpolation_mode,
             node_->get_parameter("interpolation_mode").as_string());
+}
+
+TEST_F(TestParamsConsistency, UpdateEnumControlMode) {
+  node_->set_parameters({rclcpp::Parameter("control_mode", "effort")});
+  auto updated_params = param_listener_->get_params();
+  EXPECT_EQ(updated_params.control_mode,
+            admittance_controller::Params::ControlMode::effort);
+  EXPECT_EQ(to_string(updated_params.control_mode),
+            node_->get_parameter("control_mode").as_string());
+}
+
+TEST_F(TestParamsConsistency, RejectEnumValueNotListed) {
+  auto result =
+      node_->set_parameters({rclcpp::Parameter("control_mode", "torque")});
+  EXPECT_FALSE(result[0].successful);
+  EXPECT_EQ(param_listener_->get_params().control_mode,
+            admittance_controller::Params::ControlMode::position);
+  EXPECT_EQ(node_->get_parameter("control_mode").as_string(), "position");
+}
+
+TEST_F(TestParamsConsistency, EnumReadFromDeclaredParameter) {
+  // a new listener reads the value the node already holds
+  node_->set_parameters({rclcpp::Parameter("control_mode", "velocity")});
+  admittance_controller::ParamListener listener(
+      node_->get_node_parameters_interface());
+  EXPECT_EQ(listener.get_params().control_mode,
+            admittance_controller::Params::ControlMode::velocity);
 }
 
 TEST_F(TestParamsConsistency, UpdateLtEqFifteen) {

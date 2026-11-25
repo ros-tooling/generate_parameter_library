@@ -88,6 +88,16 @@ class TestParamsConsistency(unittest.TestCase):
             self.node.get_parameter('interpolation_mode').value,
         )
 
+    def test_control_mode(self):
+        self.assertIs(
+            self.params.control_mode,
+            admittance_controller.Params.ControlMode.position,
+        )
+        # the node holds a plain string, which the enum member compares equal to
+        node_value = self.node.get_parameter('control_mode').value
+        self.assertIs(type(node_value), str)
+        self.assertEqual(self.params.control_mode, node_value)
+
     def test_subset_selection(self):
         self.assertEqual(
             list(self.params.subset_selection),
@@ -325,6 +335,33 @@ class TestParamsConsistency(unittest.TestCase):
         self.assertEqual(
             updated_params.interpolation_mode,
             self.node.get_parameter('interpolation_mode').value,
+        )
+
+    def test_update_enum_control_mode(self):
+        self.node.set_parameters([Parameter('control_mode', value='effort')])
+        updated_params = self.listener.get_params()
+        self.assertIs(
+            updated_params.control_mode,
+            admittance_controller.Params.ControlMode.effort,
+        )
+        self.assertEqual(
+            updated_params.control_mode,
+            self.node.get_parameter('control_mode').value,
+        )
+
+    def test_reject_enum_value_not_listed(self):
+        result = self.node.set_parameters([Parameter('control_mode', value='torque')])
+        self.assertFalse(result[0].successful)
+        self.assertEqual(self.listener.get_params().control_mode, 'position')
+        self.assertEqual(self.node.get_parameter('control_mode').value, 'position')
+
+    def test_enum_read_from_declared_parameter(self):
+        # a new listener reads the value the node already holds
+        self.node.set_parameters([Parameter('control_mode', value='velocity')])
+        listener = admittance_controller.ParamListener(self.node)
+        self.assertIs(
+            listener.get_params().control_mode,
+            admittance_controller.Params.ControlMode.velocity,
         )
 
     def test_update_lt_eq_fifteen(self):
