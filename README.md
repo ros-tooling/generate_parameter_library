@@ -56,6 +56,26 @@ turtlesim:
 <depend>generate_parameter_library</depend>
 ```
 
+A plain `<depend>` also installs the code generator and its Python dependencies wherever the package runs.
+To keep them off the target system, depend on the generator only at build time and on the runtime package of the generated code:
+
+```xml
+<!-- C++ (generate_parameter_library) -->
+<build_depend>generate_parameter_library</build_depend>
+<depend>generate_parameter_library_runtime_cpp</depend>
+
+<!-- Python built with setup.py (parameter_cmdclass) -->
+<build_depend>generate_parameter_library_py</build_depend>
+<exec_depend>generate_parameter_library_runtime_py</exec_depend>
+
+<!-- Python built with ament_cmake_python (generate_parameter_module) -->
+<build_depend>generate_parameter_library</build_depend>
+<exec_depend>generate_parameter_library_runtime_py</exec_depend>
+```
+
+`generate_parameter_library_runtime_cpp` is a `<depend>` rather than an `<exec_depend>` because the generated CMake target exports its dependencies to downstream packages.
+The validators used by generated Python modules moved from `generate_parameter_library_py.python_validators` to `generate_parameter_library_runtime_py.python_validators`. The old import still works where `generate_parameter_library_py` is installed, so custom validation modules should import from `generate_parameter_library_runtime_py.python_validators`.
+
 **CMakeLists.txt**
 ```cmake
 find_package(generate_parameter_library REQUIRED)
@@ -793,7 +813,10 @@ can gate a pipeline:
 ```yaml
 - name: Validate robot config
   run: |
-    pip install generate_parameter_library_py
+    # not on PyPI: install the generator together with its runtime package
+    pip install \
+      "git+https://github.com/ros-tooling/generate_parameter_library.git#subdirectory=generate_parameter_library_runtime_py" \
+      "git+https://github.com/ros-tooling/generate_parameter_library.git#subdirectory=generate_parameter_library_py"
     generate_parameter_library_validate \
       --param-definition src/navigation/config/nav_parameters.yaml \
       --param-definition src/behavior/config/behavior_parameters.yaml \

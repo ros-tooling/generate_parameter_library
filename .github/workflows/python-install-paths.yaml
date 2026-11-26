@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'generate_parameter_library_py/**'
+      - 'generate_parameter_library_runtime_py/**'
       - 'example_python/**'
       - '.github/workflows/python-install-paths.yaml'
   push:
@@ -14,6 +15,7 @@ on:
       - main
     paths:
       - 'generate_parameter_library_py/**'
+      - 'generate_parameter_library_runtime_py/**'
       - 'example_python/**'
       - '.github/workflows/python-install-paths.yaml'
 
@@ -48,15 +50,14 @@ jobs:
           path: src
           sparse-checkout: |
             generate_parameter_library_py
+            generate_parameter_library_runtime_py
             example_python
 
       - name: rosdep install
         run: |
           apt-get update
           rosdep update
-          # generate_parameter_library (C++) isn't needed to test these two packages.
-          rosdep install --from-paths src --ignore-src -y \
-            --skip-keys generate_parameter_library
+          rosdep install --from-paths src --ignore-src -y
 
       - name: colcon build
         shell: bash
@@ -68,5 +69,5 @@ jobs:
         shell: bash
         run: |
           source /opt/ros/${{ matrix.ROS_DISTRO }}/setup.bash
-          colcon test ${{ matrix.test_args }} --packages-select generate_parameter_module_example generate_parameter_library_py
+          colcon test ${{ matrix.test_args }} --packages-select generate_parameter_module_example generate_parameter_library_py generate_parameter_library_runtime_py
           colcon test-result --verbose

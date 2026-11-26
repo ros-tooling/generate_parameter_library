@@ -83,7 +83,13 @@ setup(
         ),
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
     ],
-    install_requires=['setuptools', 'typeguard', 'jinja2', 'pyyaml'],
+    install_requires=[
+        'setuptools',
+        'typeguard',
+        'jinja2',
+        'pyyaml',
+        'generate_parameter_library_runtime_py',
+    ],
     package_data={
         '': [
             'jinja_templates/cpp/declare_enum',

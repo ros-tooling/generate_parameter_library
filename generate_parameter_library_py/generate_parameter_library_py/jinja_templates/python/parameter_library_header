@@ -13,7 +13,7 @@ import enum
 import sys
 import rclpy
 import rclpy.parameter
-from generate_parameter_library_py.python_validators import ParameterValidators
+from generate_parameter_library_runtime_py.python_validators import ParameterValidators
 
 {% if user_validation_file|length -%}
 import {{user_validation_file}} as custom_validators
