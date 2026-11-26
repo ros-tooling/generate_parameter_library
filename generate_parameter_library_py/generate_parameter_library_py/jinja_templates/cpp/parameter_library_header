@@ -202,20 +202,54 @@ struct StackParams {
       return output;
     }
 
+    /**
+     * @brief Syncs mapped parameters with their key lists, e.g. after `joints` changed
+     *
+     * Declares the parameters of new keys, then brings the maps of the Params struct
+     * in line with the key lists and with the values on the node: entries of removed
+     * keys are erased, and entries of new keys or keys that were added again get the
+     * values of their parameters on the node. Existing entries are left alone, as
+     * update() keeps them current. The parameters of removed keys stay declared on the node,
+     * because rclcpp cannot undeclare statically typed parameters.
+     * Do not call it from a parameter callback such as the user callback: there the
+     * node has not stored the new values yet, and rclcpp rejects declaring parameters.
+     */
     void refresh_dynamic_parameters() {
-      auto updated_params = get_params();
-      // TODO remove any destroyed dynamic parameters
-{%- filter indent(width=6) %}
-{{remove_dynamic_parameters}}
-{%- endfilter %}
-      // declare any new dynamic parameters
-      rclcpp::Parameter param;
-{%- filter indent(width=6) %}
+      // Each attempt declares and syncs for the same snapshot of the key lists,
+      // and is stored only if nothing was stored since. Declaring a parameter
+      // triggers update(), so an attempt that declared one is repeated.
+      while (true) {
+        const auto current_params = get_params();
+        {
+          // declare the parameters of new keys
+          auto updated_params = current_params;
+          rclcpp::Parameter param;
+{%- filter indent(width=10) %}
 {{update_declare_dynamic_parameters}}
 {%- endfilter %}
+        }
+{%- if remove_dynamic_parameters|length %}
+        // sync the maps with the key lists and with the values on the node
+        auto updated_params = current_params;
+        bool any_entry_changed = false;
+{%- filter indent(width=8) %}
+{{remove_dynamic_parameters}}
+{%- endfilter %}
+        std::lock_guard<std::mutex> lock(update_mutex_);
+        if (is_old(current_params)) {
+          continue;
+        }
+        if (any_entry_changed) {
+          updated_params.__stamp = clock_.now();
+          update_internal_params(updated_params);
+        }
+{%- endif %}
+        return;
+      }
     }
 
     rcl_interfaces::msg::SetParametersResult update(const std::vector<rclcpp::Parameter> &parameters) {
+      std::unique_lock<std::mutex> update_lock(update_mutex_);
       auto updated_params = get_params();
       bool any_param_updated = false;
 
@@ -235,6 +269,8 @@ struct StackParams {
       if (any_param_updated) {
         updated_params.__stamp = clock_.now();
         update_internal_params(updated_params);
+        // outside the lock, so that the callback may use the listener
+        update_lock.unlock();
         if (user_callback_) {
           user_callback_(updated_params);
         }
@@ -289,6 +325,9 @@ struct StackParams {
 
       rclcpp::Logger logger_;
       std::mutex mutable mutex_;
+      // serializes the read-modify-write of params_ in update() and in
+      // refresh_dynamic_parameters(), so that neither reverts the other
+      std::mutex update_mutex_;
   };
 
 } // namespace {{namespace}}

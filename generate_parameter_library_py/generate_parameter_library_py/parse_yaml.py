@@ -991,6 +991,17 @@ class DeclareRuntimeParameter(DeclareParameterBase):
 
 
 class RemoveRuntimeParameter:
+    """
+    Code that syncs the struct entries of one mapped parameter with its key lists.
+
+    Rendered into ``refresh_dynamic_parameters``. Keys that are no longer in
+    their key list are erased level by level, so that a key without children
+    goes too. Keys in the lists get an entry with the value on the node, which
+    restores a key that was added again. Every change sets ``any_entry_changed``.
+    The parameters of erased keys stay declared on the node: rclcpp cannot
+    undeclare statically typed parameters, and both languages behave the same.
+    """
+
     @typechecked
     def __init__(self, dynamic_declare_parameter: DeclareRuntimeParameter):
         self.dynamic_declare_parameter = dynamic_declare_parameter
@@ -1011,9 +1022,9 @@ class RemoveRuntimeParameter:
         data = {
             'parameter_map': parameter_map,
             'mapped_params': mapped_params,
-            'dynamic_declare_parameter': str(self.dynamic_declare_parameter),
             'struct_name': struct_name,
             'parameter_field': parameter_field,
+            'parameter_as_function': self.dynamic_declare_parameter.code_gen_variable.parameter_as_function_str(),
         }
 
         j2_template = Template(GenerateCode.templates['remove_runtime_parameter'])
@@ -1380,10 +1391,9 @@ class GenerateCode:
                 [str(x) for x in self.update_declare_dynamic_parameter]
             ),
             'set_stack_params': '\n'.join([str(x) for x in self.set_stack_params]),
-            # TODO support removing runtime parameters
-            # "remove_dynamic_parameters": "\n".join(
-            #     [str(x) for x in self.remove_dynamic_parameter]
-            # ),
+            'remove_dynamic_parameters': '\n'.join(
+                [str(x) for x in self.remove_dynamic_parameter]
+            ),
         }
 
         j2_template = Template(

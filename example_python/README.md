@@ -426,7 +426,9 @@ You should see:
   nested_dynamic.wrist_3_joint.y.wrist_3_joint.y.nested_deep
   nested_map.entries
   nested_map.entry1.value
+  nested_map.entry1.weight
   nested_map.entry2.value
+  nested_map.entry2.weight
   one_number
   open_loop_control
   pid.elbow_joint.d

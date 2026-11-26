@@ -11,6 +11,7 @@ from rclpy.time import Time
 import copy
 import enum
 import sys
+import threading
 import rclpy
 import rclpy.parameter
 from generate_parameter_library_py.python_validators import ParameterValidators
@@ -18,6 +19,20 @@ from generate_parameter_library_py.python_validators import ParameterValidators
 {% if user_validation_file|length -%}
 import {{user_validation_file}} as custom_validators
 {% endif %}
+
+# Module functions rather than struct methods, so that no field or map key of a
+# definition can collide with them.
+def _map_entry_names(struct):
+    """Return the keys of the map entries of a generated struct."""
+    map_type = next(
+        value for name, value in vars(type(struct)).items() if name.endswith('__map_type')
+    )
+    return [name for name, value in vars(struct).items() if isinstance(value, map_type)]
+
+
+def _map_remove_entry(struct, name):
+    vars(struct).pop(name, None)
+
 
 class {{namespace}}:
 {%- filter indent(width=4) %}
@@ -47,6 +62,9 @@ self.stamp_ = Time()
             self.params_ = {{namespace}}.Params()
             self.node_ = node
             self.logger_ = rclpy.logging.get_logger("{{namespace}}." + prefix)
+            # serializes the read-modify-write of params_ in update() and in
+            # refresh_dynamic_parameters(), so that neither reverts the other
+            self.update_lock_ = threading.Lock()
 
             self.declare_params()
 
@@ -55,12 +73,11 @@ self.stamp_ = Time()
             self.clock_ = Clock()
 
         def get_params(self):
-            tmp = self.params_.stamp_
-            self.params_.stamp_ = None
-            paramCopy = copy.deepcopy(self.params_)
-            paramCopy.stamp_ = tmp
-            self.params_.stamp_ = tmp
-            return paramCopy
+            # Read params_ once and leave it untouched, so that an update() in
+            # another thread can neither be copied halfway nor get an old stamp.
+            # The memo keeps the stamp itself instead of copying it.
+            params = self.params_
+            return copy.deepcopy(params, {id(params.stamp_): params.stamp_})
 
         def is_old(self, other_param):
             return self.params_.stamp_ != other_param.stamp_
@@ -97,26 +114,60 @@ self.stamp_ = Time()
             self.user_callback = None
 
         def refresh_dynamic_parameters(self):
-            updated_params = self.get_params()
-            # TODO remove any destroyed dynamic parameters
-{%- filter indent(width=6) %}
-{{remove_dynamic_parameters}}
-{%- endfilter %}
-            # declare any new dynamic parameters
-{%- filter indent(width=12) %}
+            """
+            Sync mapped parameters with their key lists, e.g. after `joints` changed.
+
+            Declares the parameters of new keys, then brings the maps of the Params
+            object in line with the key lists and with the values on the node: entries
+            of removed keys are removed, and entries of new keys or keys that were added
+            again get the values of their parameters on the node. Existing entries are
+            left alone, as update() keeps them current. The parameters of removed keys stay
+            declared on the node, like in the C++ library where rclcpp cannot
+            undeclare statically typed parameters.
+            Do not call it from a parameter callback such as the user callback: there
+            the node has not stored the new values yet.
+            """
+            # Each attempt declares and syncs for the same snapshot of the key lists,
+            # and is stored only if nothing was stored since. Declaring a parameter
+            # triggers update(), so an attempt that declared one is repeated.
+            while True:
+                current_params = self.get_params()
+                # declare the parameters of new keys, on a copy of the snapshot
+                updated_params = copy.deepcopy(
+                    current_params, {id(current_params.stamp_): current_params.stamp_}
+                )
+{%- filter indent(width=16) %}
 {{update_declare_dynamic_parameters}}
 {%- endfilter %}
+{%- if remove_dynamic_parameters|length %}
+                # sync the maps with the key lists and with the values on the node
+                updated_params = copy.deepcopy(
+                    current_params, {id(current_params.stamp_): current_params.stamp_}
+                )
+                any_entry_changed = False
+{%- filter indent(width=16) %}
+{{remove_dynamic_parameters}}
+{%- endfilter %}
+                with self.update_lock_:
+                    if self.is_old(current_params):
+                        continue
+                    if any_entry_changed:
+                        updated_params.stamp_ = self.clock_.now()
+                        self.update_internal_params(updated_params)
+{%- endif %}
+                return
 
         def update(self, parameters):
-            updated_params = self.get_params()
-            any_param_updated = False
+            with self.update_lock_:
+                updated_params = self.get_params()
+                any_param_updated = False
 
-            for param in parameters:
-{%- filter indent(width=16) %}
+                for param in parameters:
+{%- filter indent(width=20) %}
 {{update_params_set}}
 {%- endfilter %}
 {% if update_dynamic_parameters|length %}
-{%- filter indent(width=12) %}
+{%- filter indent(width=16) %}
 # update dynamic parameters
 for param in parameters:
 {%- filter indent(width=4) %}
@@ -125,11 +176,12 @@ for param in parameters:
 {%- endfilter %}
 {%- endif %}
 
-            if any_param_updated:
-                updated_params.stamp_ = self.clock_.now()
-                self.update_internal_params(updated_params)
-                if self.user_callback:
-                    self.user_callback(self.get_params())
+                if any_param_updated:
+                    updated_params.stamp_ = self.clock_.now()
+                    self.update_internal_params(updated_params)
+            # outside the lock, so that the callback may use the listener
+            if any_param_updated and self.user_callback:
+                self.user_callback(self.get_params())
             return SetParametersResult(successful=True)
 
         def update_internal_params(self, updated_params):
