@@ -52,6 +52,7 @@ You should see:
   elbow_joint.y.weight
   enable_parameter_update_without_reactivation
   fixed_array
+  fixed_bool_array
   fixed_string
   fixed_string_array
   fixed_string_array_no_default

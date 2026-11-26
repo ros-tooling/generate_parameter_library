@@ -42,6 +42,7 @@ You should see:
   control_mode
   enable_parameter_update_without_reactivation
   fixed_array
+  fixed_bool_array
   fixed_string
   fixed_string_no_default
   fixed_world_frame.frame.external

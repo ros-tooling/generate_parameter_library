@@ -277,6 +277,7 @@ The types of parameters in ros2 map to C++ types.
 | int_array       | `std::vector<int>`         |
 | bool_array      | `std::vector<bool>`        |
 | string_fixed_XX | `FixedSizeString<XX>`      |
+| bool_array_fixed_XX, int_array_fixed_XX, double_array_fixed_XX, string_array_fixed_XX | `rsl::StaticVector<T, XX>` |
 | none            | NO CODE GENERATED          |
 
 Fixed-size types are denoted with a suffix `_fixed_XX`, where `XX` is the desired size.

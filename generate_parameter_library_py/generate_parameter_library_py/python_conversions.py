@@ -45,6 +45,7 @@ class PythonConversions:
             'double_array': lambda defined_type, templates: '[float]',
             'int_array': lambda defined_type, templates: '[int]',
             'string_array': lambda defined_type, templates: '[str]',
+            'bool_array_fixed': lambda defined_type, templates: '[bool]',
             'double_array_fixed': lambda defined_type, templates: '[float]',
             'int_array_fixed': lambda defined_type, templates: '[int]',
             'string_array_fixed': lambda defined_type, templates: '[str]',

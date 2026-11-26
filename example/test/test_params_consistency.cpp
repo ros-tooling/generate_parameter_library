@@ -176,6 +176,12 @@ TEST_F(TestParamsConsistency, FixedArray) {
   EXPECT_THAT(params_vec, ::testing::ElementsAreArray(param_vec));
 }
 
+TEST_F(TestParamsConsistency, FixedBoolArray) {
+  auto param_vec = node_->get_parameter("fixed_bool_array").as_bool_array();
+  auto params_vec = rsl::to_vector(params_.fixed_bool_array);
+  EXPECT_THAT(params_vec, ::testing::ElementsAreArray(param_vec));
+}
+
 TEST_F(TestParamsConsistency, EnableParameterUpdateWithoutReactivation) {
   EXPECT_EQ(params_.enable_parameter_update_without_reactivation,
             node_->get_parameter("enable_parameter_update_without_reactivation")
@@ -475,6 +481,23 @@ TEST_F(TestParamsConsistency, UpdateDoubleArrayFixedArray) {
   EXPECT_THAT(params_vec, ::testing::ElementsAreArray(new_value));
   auto param_vec = node_->get_parameter("fixed_array").as_double_array();
   EXPECT_THAT(params_vec, ::testing::ElementsAreArray(param_vec));
+}
+
+TEST_F(TestParamsConsistency, UpdateBoolArrayFixedArray) {
+  std::vector<bool> new_value{false, true};
+  node_->set_parameters({rclcpp::Parameter("fixed_bool_array", new_value)});
+  auto updated_params = param_listener_->get_params();
+  auto params_vec = rsl::to_vector(updated_params.fixed_bool_array);
+  EXPECT_THAT(params_vec, ::testing::ElementsAreArray(new_value));
+  auto param_vec = node_->get_parameter("fixed_bool_array").as_bool_array();
+  EXPECT_THAT(params_vec, ::testing::ElementsAreArray(param_vec));
+}
+
+TEST_F(TestParamsConsistency, RejectBoolArrayAboveFixedSize) {
+  std::vector<bool> too_long(6, true);
+  auto result =
+      node_->set_parameters({rclcpp::Parameter("fixed_bool_array", too_long)});
+  EXPECT_FALSE(result[0].successful);
 }
 
 TEST_F(TestParamsConsistency, UpdateDoubleArrayAdmittanceMass) {
